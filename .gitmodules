@@ -1,0 +1,3 @@
+[submodule "include/debug-bash"]
+	path = include/debug-bash
+	url = git@github.com:josephtingiris/debug-bash
