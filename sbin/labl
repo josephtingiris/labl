@@ -25,9 +25,9 @@ Options+=(restart)
 #Options+=(restore) # TODO; support this
 #Options+=(save) # TODO; support this
 Options+=(start)
+Options+=(state)
 Options+=(status)
 Options+=(stop)
-Options+=(summary)
 
 IP_Families=(inet6 inet)
 
@@ -687,7 +687,7 @@ function lablInit() {
                 fi
             done
 
-            if [ "$Option" == "auto" ] || [ "$Option" == "restart" ] || [ "$Option" == "start" ] || [ "$Option" == "status" ] || [ "$Option" == "stop" ] || [ "$Option" == "summary" ]; then
+            if [ "$Option" == "auto" ] || [ "$Option" == "restart" ] || [ "$Option" == "start" ] || [ "$Option" == "state" ] || [ "$Option" == "status" ] || [ "$Option" == "stop" ]; then
                 if [ "$Ipset_Mode" == "" ]; then
                     Ipset_Mode="$2"
                 fi
@@ -723,7 +723,7 @@ function lablInit() {
     fi
     debug "$FUNCNAME Flag = $Flag" 15
 
-    if [ "$Option" == "auto" ] || [ "$Option" == "restart" ] || [ "$Option" == "start" ] || [ "$Option" == "status" ] || [ "$Option" == "stop" ] || [ "$Option" == "summary" ]; then
+            if [ "$Option" == "auto" ] || [ "$Option" == "restart" ] || [ "$Option" == "start" ] || [ "$Option" == "state" ] || [ "$Option" == "status" ] || [ "$Option" == "stop" ]; then
         IP_Address=""
     else
         debug "IP_Address = $IP_Address" 1
@@ -1261,6 +1261,16 @@ function lablStart() {
     fi
 }
 
+# provide state of stateful/ephemeral lists
+function lablState() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
+
+    lablLoadBlacklists
+    #echo "Blacklists = ${Blacklists[@]}"
+    #lablLoadWhitelists
+    #echo "Whitelists = ${Whitelists[@]}"
+}
+
 # list contents of all ipsets & iptables rules
 function lablStatus() {
     debug "$FUNCNAME Function = $FUNCNAME" 50
@@ -1517,16 +1527,6 @@ function lablStop() {
 
 }
 
-# provide summary of stateful/ephemeral lists
-function lablSummary() {
-    debug "$FUNCNAME Function = $FUNCNAME" 50
-
-    lablLoadBlacklists
-    #echo "Blacklists = ${Blacklists[@]}"
-    #lablLoadWhitelists
-    #echo "Whitelists = ${Whitelists[@]}"
-}
-
 # cli usage
 function usage() {
     debug "$FUNCNAME Function = $FUNCNAME" 50
@@ -1539,7 +1539,7 @@ function usage() {
         local usage_message="$usage_header <"
         for Option in ${Options[@]}; do
             # these options do NOT require an ip|ip/cdr
-            if [ "$Option" == "auto" ] || [ "$Option" == "restart" ] || [ "$Option" == "start" ] || [ "$Option" == "status" ] || [ "$Option" == "stop" ] || [ "$Option" == "summary" ]; then
+            if [ "$Option" == "auto" ] || [ "$Option" == "restart" ] || [ "$Option" == "start" ] || [ "$Option" == "state" ] || [ "$Option" == "status" ] || [ "$Option" == "stop" ]; then
                 continue
             fi
             usage_message+="$Option|"
@@ -1550,7 +1550,7 @@ function usage() {
         if [ "$Ipset_Mode" == "" ]; then
             local usage_message+=$usage_footer
         fi
-        usage_message+="\n-or-\n$usage_header <auto|restart|start|status|stop|summary>"
+        usage_message+="\n-or-\n$usage_header <auto|restart|start|state|status|stop>"
     else
         if [ "$Option" == "$Flag" ]; then
             local usage_message="$usage_header $Option $ip_address"
@@ -1601,6 +1601,12 @@ if [ "$Option" == "start" ]; then
     exit
 fi
 
+# state is a special option, exit
+if [ "$Option" == "state" ]; then
+    lablState
+    exit
+fi
+
 # status is a special option, exit
 if [ "$Option" == "status" ]; then
     lablStatus
@@ -1610,12 +1616,6 @@ fi
 # stop is a special option, exit
 if [ "$Option" == "stop" ]; then
     lablStop
-    exit
-fi
-
-# summary is a special option, exit
-if [ "$Option" == "summary" ]; then
-    lablSummary
     exit
 fi
 
