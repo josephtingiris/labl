@@ -27,6 +27,7 @@ Options+=(restart)
 Options+=(start)
 Options+=(status)
 Options+=(stop)
+Options+=(summary)
 
 IP_Families=(inet6 inet)
 
@@ -37,16 +38,22 @@ Ipset_Hashsize=2048 # The initial hash size for Ipset_Name, default is 1024. The
 Ipset_Maxelem=131072 # The maximum number of elements/entries in the ipset, default is 65536.  TODO; test max sizes
 
 if [ "$DEBUG" == "" ]; then
-    let Debug=0 # 0 disables debug
+    if [ "$Debug" == "" ]; then
+        let Debug=0 # 0 disables debug
+    else
+        let Debug=$Debug # ensure it's an integer
+    fi
 else
     let Debug=$DEBUG+0
 fi
 
+Basename_0=$(basename $0)
+Dirname_0="$(dirname $0)"
 Tmp_Dir=/opt/labl/tmp
 
 # print formatted output to stdout
-function _Echo() {
-    Debug "$FUNCNAME Function = $FUNCNAME" 20
+function _echo() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     if [ "$2" == "" ]; then
         local echo_status="OK"
@@ -58,8 +65,7 @@ function _Echo() {
 }
 
 # print formatted output to stderr
-function _Error() {
-    Debug "$FUNCNAME Function = $FUNCNAME" 20
+function _error() {
 
     if [ "$2" == "" ]; then
         local error_level="ERROR"
@@ -71,7 +77,7 @@ function _Error() {
 }
 
 # exit with a message and non-zero return code
-function Aborting() {
+function aborting() {
     printf "\naborting ... $@"
     printf "\n\n"
     if [[ $2 == '^[0-9]+$' ]]; then
@@ -82,27 +88,31 @@ function Aborting() {
     exit $RC
 }
 
-# print debug output to stderr if global Debug is greater than or equal to local debug_level
-function Debug() {
-    if [ $Debug -eq 0 ]; then
-        return
-    fi
+if [ -r "${Dirname_0}/../include/debug-bash/Debug.bash" ]; then
+    source "${Dirname_0}/../include/debug-bash/Debug.bash"
+else
+    # print debug output to stderr if global debug is greater than or equal to local debug_level
+    function debug() {
+        if [ $Debug -eq 0 ]; then
+            return
+        fi
 
-    local debug_message=$1
-    local debug_level=$(echo "$2" |  sed "s/[^0-9]//g")
+        local debug_message=$1
+        local debug_level=$(echo "$2" |  sed "s/[^0-9]//g")
 
-    if [ "$debug_level" == "" ]; then
-        local -i debug_level=0 # default debug level is 0
-    fi
+        if [ "$debug_level" == "" ]; then
+            local -i debug_level=0 # default debug level is 0
+        fi
 
-    if [ $Debug -ge $debug_level ]; then
-        _Error "$debug_message" "DEBUG(${Debug},${debug_level})"
-    fi
-}
+        if [ $Debug -ge $debug_level ]; then
+            _error "$debug_message" "DEBUG(${Debug},${debug_level})"
+        fi
+    }
+fi
 
 # regex to validate hostname
-function Hostname_Valid() {
-    Debug "$FUNCNAME Function = $FUNCNAME" 20
+function hostnameValid() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     local hostname=${1}
     [[ $hostname =~ ^(([a-zA-Z]|[a-zA-Z][a-zA-Z0-9-]*[a-zA-Z0-9]).)*([A-Za-z]|[A-Za-z][A-Za-z0-9-]*[A-Za-z0-9])$ ]] || return 1
@@ -110,83 +120,83 @@ function Hostname_Valid() {
 }
 
 # validate 'IP_Address' & set global IP_Address_Family if it passes
-function IP_Valid() {
-    Debug "$FUNCNAME Function = $FUNCNAME" 20
+function ipValid() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     local ip_address="$1"
 
-    Debug "$FUNCNAME ip_address = $ip_address" 15
+    debug "$FUNCNAME ip_address = $ip_address" 15
 
     # the rest of the options require an ip|ip/cidr, so that must be validated ...
     if [ "$ip_address" == "" ]; then
-        _Error "empty ip_address passed to $FUNCNAME" WARNING
+        _error "empty ip_address passed to $FUNCNAME" WARNING
         return 1
     else
 
         # hostnames are NOT supported
-        if Hostname_Valid "$ip_address"; then
-            Debug "$FUNCNAME Valid Hostname" 15
+        if hostnameValid "$ip_address"; then
+            debug "$FUNCNAME Valid Hostname" 15
             IP_Address_Family="hostname"
         else
-            Debug "$FUNCNAME Invalid Hostname" 15
+            debug "$FUNCNAME Invalid Hostname" 15
         fi
 
         if [ "$IP_Address_Family" == "" ]; then
-            if IPv4_Valid "$ip_address"; then
-                Debug "$FUNCNAME Valid IPv4 IP Address" 15
+            if ipv4Valid "$ip_address"; then
+                debug "$FUNCNAME Valid IPv4 IP Address" 15
                 IP_Address_Family="inet"
             else
-                Debug "$FUNCNAME Invalid IPv4 IP Address" 15
+                debug "$FUNCNAME Invalid IPv4 IP Address" 15
             fi
         fi
 
         if [ "$IP_Address_Family" == "" ]; then
-            if IPv4_Valid_CIDR "$ip_address"; then
-                Debug "$FUNCNAME Valid IPv4 CIDR Range" 15
+            if ipv4ValidCidr "$ip_address"; then
+                debug "$FUNCNAME Valid IPv4 CIDR Range" 15
                 IP_Address_Family="inet"
             else
-                Debug "$FUNCNAME Invalid IPv4 CIDR Range" 15
+                debug "$FUNCNAME Invalid IPv4 CIDR Range" 15
             fi
         fi
 
         if [ "$IP_Address_Family" == "" ]; then
-            if IPv6_Valid "$ip_address"; then
-                Debug "$FUNCNAME Valid IPv6 IP Address" 15
+            if ipv6Valid "$ip_address"; then
+                debug "$FUNCNAME Valid IPv6 IP Address" 15
                 IP_Address_Family="inet6"
             else
-                Debug "$FUNCNAME Invalid IPv6 IP Address" 15
+                debug "$FUNCNAME Invalid IPv6 IP Address" 15
             fi
         fi
 
         if [ "$IP_Address_Family" == "" ]; then
-            if IPv6_Valid_CIDR "$ip_address"; then
-                Debug "$FUNCNAME Valid IPv6 CIDR Range" 15
+            if ipv6ValidCidr "$ip_address"; then
+                debug "$FUNCNAME Valid IPv6 CIDR Range" 15
                 IP_Address_Family="inet6"
             else
-                Debug "$FUNCNAME Invalid IPv6 CIDR Range" 15
+                debug "$FUNCNAME Invalid IPv6 CIDR Range" 15
             fi
         fi
 
         if [ "$IP_Address_Family" == "hostname" ] || [ "$IP_Address_Family" == "" ]; then
-            Debug "$FUNCNAME invalid IP_Address_Family $IP_Address_Family"
+            debug "$FUNCNAME invalid IP_Address_Family $IP_Address_Family" 15
             if [ "$IP_Address_Family" == "" ]; then
-                _Error "empty IP_Address_Family in $FUNCNAME" WARNING
+                _error "empty IP_Address_Family in $FUNCNAME" WARNING
             fi
             return 1
         else
-            Debug "$FUNCNAME IP_Address_Family = $IP_Address_Family" 15
+            debug "$FUNCNAME IP_Address_Family = $IP_Address_Family" 15
         fi
     fi
 
-    Debug "$FUNCNAME ip_address = $ip_address" 12
+    debug "$FUNCNAME ip_address = $ip_address" 12
 
     return 0
 
 }
 
 # regex for IPv4 validation
-function IPv4_Valid() {
-    Debug "$FUNCNAME Function = $FUNCNAME" 20
+function ipv4Valid() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     local inet=${1}
 
@@ -201,8 +211,8 @@ function IPv4_Valid() {
 }
 
 # regex for IPv4 CIDR validation
-function IPv4_Valid_CIDR() {
-    Debug "$FUNCNAME Function = $FUNCNAME" 20
+function ipv4ValidCidr() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     local inet_range=${1}
 
@@ -214,8 +224,8 @@ function IPv4_Valid_CIDR() {
 }
 
 # regex for IPv6 validation
-function IPv6_Valid() {
-    Debug "$FUNCNAME Function = $FUNCNAME" 20
+function ipv6Valid() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     local inet6=${1}
 
@@ -227,8 +237,8 @@ function IPv6_Valid() {
 }
 
 # regex for IPv6 CIDR validation
-function IPv6_Valid_CIDR() {
-    Debug "$FUNCNAME Function = $FUNCNAME" 20
+function ipv6ValidCidr() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     local inet6_range=${1}
 
@@ -240,17 +250,17 @@ function IPv6_Valid_CIDR() {
 }
 
 # add an ip address or range to the appropriate ipset
-function Labl_Add() {
-    Debug "$FUNCNAME Function = $FUNCNAME" 20
+function lablAdd() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     local ip="$1"
-    if ! IP_Valid "$ip"; then
-        Debug "$FUNCNAME ip $ip is invalid" 1
+    if ! ipValid "$ip"; then
+        debug "$FUNCNAME ip $ip is invalid" 1
         return 1
     fi
 
     if [ "$ip" == "" ]; then
-        Debug "$FUNCNAME ip is empty" 1
+        debug "$FUNCNAME ip is empty" 1
         return 1
     fi
 
@@ -277,21 +287,21 @@ function Labl_Add() {
     fi
 
     if [ "$2" == "all" ]; then
-        _Error "$FUNCNAME ip $ip is being whitelisted THEN blacklisted (this hasn't been fully tested!)" WARNING
+        _error "$FUNCNAME ip $ip is being whitelisted THEN blacklisted (this hasn't been fully tested!)" WARNING
         local whitelist=0
         local blacklist=0
     fi
 
-    if IPv4_Valid "$ip"; then
+    if ipv4Valid "$ip"; then
         local ip_families=("inet")
     else
-        if IPv4_Valid_CIDR "$ip"; then
+        if ipv4ValidCidr "$ip"; then
             local ip_families=("inet")
         else
-            if IPv6_Valid "$ip"; then
+            if ipv6Valid "$ip"; then
                 local ip_families=("inet6")
             else
-                if IPv6_Valid_CIDR "$ip"; then
+                if ipv6ValidCidr "$ip"; then
                     local ip_families=("inet6")
                 else
                     local ip_families=(${IP_Families[@]})
@@ -299,7 +309,7 @@ function Labl_Add() {
             fi
         fi
     fi
-    Debug "ip_families = ${ip_families[@]}" 7
+    debug "ip_families = ${ip_families[@]}" 7
 
     local ip_family
     for ip_family in ${ip_families[@]}; do
@@ -310,14 +320,14 @@ function Labl_Add() {
         # whitelist first
         if [ $whitelist -eq 0 ]; then
 
-            Debug "$FUNCNAME ip = $ip ($ip_family) $whitelist whitelist" 15
+            debug "$FUNCNAME ip = $ip ($ip_family) $whitelist whitelist" 15
 
             # remove it from blacklist
-            if Labl_Check "$ip" blacklist quiet; then
+            if lablCheck "$ip" blacklist quiet; then
 
-                Debug "$FUNCNAME $ip exists in blacklist" 15
+                debug "$FUNCNAME $ip exists in blacklist" 15
 
-                if Labl_Remove "$ip" blacklist quiet; then
+                if lablRemove "$ip" blacklist quiet; then
                     local blacklisted=1
                     echo "[-] $ip removed from blacklist"
                 else
@@ -325,35 +335,35 @@ function Labl_Add() {
                     echo "[-] $ip NOT removed from blacklist"
                 fi
 
-                if Labl_Check "$ip" blacklist quiet; then
+                if lablCheck "$ip" blacklist quiet; then
                     local blacklisted=0
-                    _Error "$ip NOT removed from blacklist" WARNING
+                    _error "$ip NOT removed from blacklist" WARNING
                 fi
             else
                 local blacklisted=1
-                Debug "$FUNCNAME $ip is NOT in blacklist" 15
+                debug "$FUNCNAME $ip is NOT in blacklist" 15
             fi
 
             if [ $blacklisted -eq 1 ]; then
                 if [ $Ipset_Nomatch -eq 0 ]; then
                     # add it to whitelist
                     # TODO; revisit this logic; explicit whitelisting or implicit??
-                    #if Labl_Check "$ip" whitelist quiet; then
+                    #if lablCheck "$ip" whitelist quiet; then
                     #echo "[-] $ip exists in whitelist"
                     #else
                     # right now it's explicit ...
                     ipset -exist add ${Ipset_Name}_${ip_family} $ip nomatch &> /dev/null
-                    if Labl_Check "$ip" whitelist quiet; then
+                    if lablCheck "$ip" whitelist quiet; then
                         printf "[-] $ip added to whitelist\n"
                     else
-                        _Error "$FUNCNAME $ip NOT added to whitelist" WARNING
+                        _error "$FUNCNAME $ip NOT added to whitelist" WARNING
                     fi
                     #fi
                 else
-                    Debug "$FUNCNAME $ip NOT added to whitelist because $Ipset_Version does not support it" 1
+                    debug "$FUNCNAME $ip NOT added to whitelist because $Ipset_Version does not support it" 1
                 fi
             else
-                _Error "unable to whitelist $ip because it's currently blacklisted; try running '$Readlink_0 remove $ip blacklist'" WARNING
+                _error "unable to whitelist $ip because it's currently blacklisted; try running '$Readlink_0 remove $ip blacklist'" WARNING
             fi
 
         fi
@@ -361,49 +371,49 @@ function Labl_Add() {
         # blacklist second
         if [ $blacklist -eq 0 ]; then
 
-            Debug "$FUNCNAME ip = $ip ($ip_family) $blacklist blacklist" 15
+            debug "$FUNCNAME ip = $ip ($ip_family) $blacklist blacklist" 15
 
             # automating this part is subjective; works but needs work
 
-            if Labl_Check_Whitelists "$ip"; then
-                Debug "$FUNCNAME $ip exists in whitelist.labl" 10
+            if lablCheckWhitelists "$ip"; then
+                debug "$FUNCNAME $ip exists in whitelist.labl" 10
                 printf "[-] $ip NOT blacklisted\n"
                 continue
             else
-                Debug "$FUNCNAME [ALLOWING] $ip is NOT in a whitelist.labl file" 10
+                debug "$FUNCNAME [ALLOWING] $ip is NOT in a whitelist.labl file" 10
                 #echo "[-] $ip NOT in whitelist.labl file"
 
                 # if it's not in a persistent whitelist, remove it from nomatch set?
-                if [ "$TESTING" != "" ]; then
-                    if Labl_Check "$ip" whitelist quiet; then
+                if [ "$Testing" != "" ]; then
+                    if lablCheck "$ip" whitelist quiet; then
 
-                        Debug "$FUNCNAME $ip exists in whitelist"
+                        debug "$FUNCNAME $ip exists in whitelist" 15
                         local whitelisted=0
 
-                        if Labl_Remove "$ip" whitelist quiet; then
+                        if lablRemove "$ip" whitelist quiet; then
                             echo "[-] $ip removed from whitelist"
                         else
                             echo "[-] $ip NOT removed from whitelist"
                             local whitelisted=0
                         fi
 
-                        if Labl_Check "$ip" whitelist; then
-                            Debug "$FUNCNAME [WARNING] $ip NOT removed from whitelist" 2
+                        if lablCheck "$ip" whitelist; then
+                            debug "$FUNCNAME [WARNING] $ip NOT removed from whitelist" 2
                             local whitelisted=0
                         fi
                     else
-                        Debug "$FUNCNAME $ip is NOT in whitelist"
+                        debug "$FUNCNAME $ip is NOT in whitelist" 15
                         local whitelisted=0
                     fi
                 fi
             fi
 
             # add it to blacklist
-            if Labl_Check "$ip" blacklist quiet; then
+            if lablCheck "$ip" blacklist quiet; then
                 printf "[-] $ip is already blacklisted\n"
             else
                 ipset -exist add ${Ipset_Name}_${ip_family} $ip &> /dev/null
-                if Labl_Check "$ip" blacklist quiet; then
+                if lablCheck "$ip" blacklist quiet; then
                     printf "[+++] $ip added to blacklist\n"
                 fi
             fi
@@ -415,16 +425,16 @@ function Labl_Add() {
 }
 
 # automatically add ip address(es) or range(s) to the appropriate ipset
-function Labl_Auto() {
-    Debug "$FUNCNAME Function = $FUNCNAME" 20
+function lablAuto() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
-    Debug "$FUNCNAME automatic"
+    debug "$FUNCNAME automatic" 15
 
 }
 
 # check if an ip address or range is in an ipset
-function Labl_Check() {
-    Debug "$FUNCNAME Function = $FUNCNAME" 20
+function lablCheck() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     if [ "$1" == "" ]; then
         local ip="$IP_Address"
@@ -433,7 +443,7 @@ function Labl_Check() {
     fi
 
     if [ "$ip" == "" ]; then
-        Debug "$FUNCNAME ip is empty" 1
+        debug "$FUNCNAME ip is empty" 1
         return 1
     fi
 
@@ -470,17 +480,17 @@ function Labl_Check() {
         local quiet=1
     fi
 
-    Debug "ip_families = ${ip_families[@]}" 7
-    if IPv4_Valid "$ip"; then
+    debug "ip_families = ${ip_families[@]}" 7
+    if ipv4Valid "$ip"; then
         local ip_families=("inet")
     else
-        if IPv4_Valid_CIDR "$ip"; then
+        if ipv4ValidCidr "$ip"; then
             local ip_families=("inet")
         else
-            if IPv6_Valid "$ip"; then
+            if ipv6Valid "$ip"; then
                 local ip_families=("inet6")
             else
-                if IPv6_Valid_CIDR "$ip"; then
+                if ipv6ValidCidr "$ip"; then
                     local ip_families=("inet6")
                 else
                     local ip_families=(${IP_Families[@]})
@@ -488,7 +498,7 @@ function Labl_Check() {
             fi
         fi
     fi
-    Debug "ip_families = ${ip_families[@]}" 7
+    debug "ip_families = ${ip_families[@]}" 7
 
     local ip_family
     for ip_family in ${ip_families[@]}; do
@@ -498,7 +508,7 @@ function Labl_Check() {
         #let quiet=1
 
         if [ $whitelist -eq 0 ]; then
-            Debug "$FUNCNAME ip = $ip ($ip_family) whitelist" 5
+            debug "$FUNCNAME ip = $ip ($ip_family) whitelist" 5
             # nomatch tests are true for both 'nomatch' rules and absence of specific match rules
             # TODO; fix stdout ... misleading
             ipset test ${Ipset_Name}_${ip_family} $ip &> /dev/null
@@ -519,7 +529,7 @@ function Labl_Check() {
         fi
 
         if [ $blacklist -eq 0 ]; then
-            Debug "$FUNCNAME ip = $ip ($ip_family) blacklist" 5
+            debug "$FUNCNAME ip = $ip ($ip_family) blacklist" 5
             ipset test ${Ipset_Name}_${ip_family} $ip &> /dev/null
             if [ $? -eq 0 ]; then
                 let blacklisted=0
@@ -543,8 +553,8 @@ function Labl_Check() {
 }
 
 # check if an ip address or range is in a whitelist.labl file
-function Labl_Check_Whitelists() {
-    Debug "$FUNCNAME Function = $FUNCNAME" 20
+function lablCheckWhitelists() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     if [ "$1" == "" ]; then
         local ip="$IP_Address"
@@ -553,47 +563,47 @@ function Labl_Check_Whitelists() {
     fi
 
     if [ "$ip" == "" ]; then
-        Debug "$FUNCNAME ip is empty" 1
+        debug "$FUNCNAME ip is empty" 1
         return 1
     fi
-    Debug "$FUNCNAME ip = $ip" 15
+    debug "$FUNCNAME ip = $ip" 15
 
-    Labl_Load_Whitelists
+    lablLoadWhitelists
 
     local ip_range=$(subnetcalc $ip -n -nocolor 2> /dev/null | grep ^Host\ Range)
-    Debug "$FUNCNAME ip_range = $ip_range" 10
+    debug "$FUNCNAME ip_range = $ip_range" 10
 
     local whitelist_cidr="32"
     let local whitelist_match=1
 
     local whitelist
     for whitelist in ${Whitelists[@]}; do
-        Debug "$FUNCNAME whitelist = $whitelist" 10
+        debug "$FUNCNAME whitelist = $whitelist" 10
 
         local whitelist_cidr=${whitelist##*/} # ${0##*/}
         if [ "$whitelist_cidr" == "$whitelist" ]; then
-            Debug "$FUNCNAME [WARNING] whitelist_cidr == whitelist $whitelist" 10
+            debug "$FUNCNAME [WARNING] whitelist_cidr == whitelist $whitelist" 10
             continue
         fi
 
-        Debug "$FUNCNAME " 15
-        Debug "$FUNCNAME ip = $ip, whitelist = $whitelist, whitelist_cidr = $whitelist_cidr" 15
-        Debug "$FUNCNAME " 20
+        debug "$FUNCNAME " 20
+        debug "$FUNCNAME ip = $ip, whitelist = $whitelist, whitelist_cidr = $whitelist_cidr" 15
+        debug "$FUNCNAME " 20
 
         # perfect match
         if [ "$ip" == "$whitelist" ]; then
-            Debug "$FUNCNAME ip = $ip, whitelist = $whitelist [MATCH, PERFECT]" 22
+            debug "$FUNCNAME ip = $ip, whitelist = $whitelist [MATCH, PERFECT]" 22
             let local whitelist_match=0
             break
         fi
 
         # if it's not a perfect match, checking other /32's is pointless
         if [ "$whitelist_cidr" == "32" ]; then
-            Debug "$FUNCNAME ip = $ip, whitelist = $whitelist [SKIP, IMPOSSIBLE]" 22
+            debug "$FUNCNAME ip = $ip, whitelist = $whitelist [SKIP, IMPOSSIBLE]" 22
             continue
         fi
 
-        Debug "$FUNCNAME ip = $ip, whitelist = $whitelist [OK, CHECK]" 22
+        debug "$FUNCNAME ip = $ip, whitelist = $whitelist [OK, CHECK]" 22
 
         # strip the mask off the ip, replace it with the whitelist mask, & compare ranges
         ip_whitelist=${ip%%/*}
@@ -602,20 +612,20 @@ function Labl_Check_Whitelists() {
         local ip_whitelist_range=$(subnetcalc $ip_whitelist -n -nocolor 2> /dev/null | grep ^Host\ Range)
         if [ "$whitelist_range" == "$ip_whitelist_range" ]; then
             let local whitelist_match=0
-            Debug "$FUNCNAME ip = $ip, whitelist = $whitelist [MATCH, RANGE]" 22
-            Debug "$FUNCNAME ip = $ip, whitelist = $whitelist ip_whitelist = $ip_whitelist" 15
-            Debug "$FUNCNAME ip_whitelist_range = $ip_whitelist_range ($ip_whitelist)" 15
+            debug "$FUNCNAME ip = $ip, whitelist = $whitelist [MATCH, RANGE]" 22
+            debug "$FUNCNAME ip = $ip, whitelist = $whitelist ip_whitelist = $ip_whitelist" 15
+            debug "$FUNCNAME ip_whitelist_range = $ip_whitelist_range ($ip_whitelist)" 15
             break
         fi
 
-        Debug "$FUNCNAME ip_range           = $ip_range ($ip)" 15
-        Debug "$FUNCNAME whitelist_range    = $whitelist_range ($whitelist)" 15
+        debug "$FUNCNAME ip_range           = $ip_range ($ip)" 15
+        debug "$FUNCNAME whitelist_range    = $whitelist_range ($whitelist)" 15
     done
     unset whitelist
 
     if [ $whitelist_match -eq 0 ]; then
-        Debug "$FUNCNAME ip = $ip AND whitelist = $whitelist [MATCH]" 5
-        _Error "$ip is whitelisted via $(echo ${Whitelists_Files[@]})" NOTICE
+        debug "$FUNCNAME ip = $ip AND whitelist = $whitelist [MATCH]" 5
+        _error "$ip is whitelisted via $(echo ${Whitelists_Files[@]})" NOTICE
         return 0
     fi
 
@@ -625,11 +635,11 @@ function Labl_Check_Whitelists() {
 }
 
 # initialize all dependencies, etc.
-function Labl_Init() {
-    Debug "$FUNCNAME Function = $FUNCNAME" 20
+function lablInit() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     if [ "$USER" != "root" ]; then
-        Aborting "must be root" 3
+        aborting "must be root" 3
     fi
 
     # ensure executable dependencies are available
@@ -650,7 +660,7 @@ function Labl_Init() {
     for dependency in ${Dependencies[@]}; do
         which $dependency &> /dev/null
         if [ $? -ne 0 ]; then
-            Aborting "FAILED which dependency '$dependency'" 3
+            aborting "FAILED which dependency '$dependency'" 3
         fi
     done
     unset dependency
@@ -677,7 +687,7 @@ function Labl_Init() {
                 fi
             done
 
-            if [ "$Option" == "auto" ] || [ "$Option" == "restart" ] || [ "$Option" == "start" ] || [ "$Option" == "status" ] || [ "$Option" == "stop" ]; then
+            if [ "$Option" == "auto" ] || [ "$Option" == "restart" ] || [ "$Option" == "start" ] || [ "$Option" == "status" ] || [ "$Option" == "stop" ] || [ "$Option" == "summary" ]; then
                 if [ "$Ipset_Mode" == "" ]; then
                     Ipset_Mode="$2"
                 fi
@@ -696,33 +706,33 @@ function Labl_Init() {
 
         if [ $Valid_Flag -eq 1 ]; then
             if [ "$Flag" == "" ]; then
-                Debug "$FUNCNAME no flag"
-                Usage
+                debug "$FUNCNAME no flag" 15
+                usage
             else
                 Flag=""
-                Usage "invalid flag"
+                usage "invalid flag"
             fi
         fi
 
-        Debug "$FUNCNAME Option = $Option (Flag)" 15
+        debug "$FUNCNAME Option = $Option (Flag)" 15
     else
         IP_Address="$1"
         if [ "$Ipset_Mode" == "" ]; then
             Ipset_Mode="$2"
         fi
     fi
-    Debug "$FUNCNAME Flag = $Flag"
+    debug "$FUNCNAME Flag = $Flag" 15
 
-    if [ "$Option" == "auto" ] || [ "$Option" == "restart" ] || [ "$Option" == "start" ] || [ "$Option" == "status" ] || [ "$Option" == "stop" ]; then
+    if [ "$Option" == "auto" ] || [ "$Option" == "restart" ] || [ "$Option" == "start" ] || [ "$Option" == "status" ] || [ "$Option" == "stop" ] || [ "$Option" == "summary" ]; then
         IP_Address=""
     else
-        Debug "IP_Address = $IP_Address" 1
+        debug "IP_Address = $IP_Address" 1
 
-        if ! IP_Valid "$IP_Address"; then
+        if ! ipValid "$IP_Address"; then
             if [ "$IP_Address_Family" == "hostname" ]; then
-                Usage "hostnames are NOT supported"
+                usage "hostnames are NOT supported"
             else
-                Usage "invalid IP address or CIDR range '$IP_Address'"
+                usage "invalid IP address or CIDR range '$IP_Address'"
             fi
         fi
 
@@ -730,36 +740,36 @@ function Labl_Init() {
 
     # no flag or option, basic usage
     if [ "$Flag" == "" ]; then
-        Usage
+        usage
     fi
 
     if [ "$Ipset_Mode" != "whitelist" ]; then
         Ipset_Mode="blacklist"
     fi
-    Debug "$FUNCNAME Ipset_Mode = $Ipset_Mode" 5
+    debug "$FUNCNAME Ipset_Mode = $Ipset_Mode" 5
 
     Ipset_Version=$(ipset -v 2> /dev/null | awk -F, '{print $1}')
-    # TODO; verify exactly which version starts supporting nomatch & enhance this to allow versions greater than that
+    # TODO; verify exactly which version of ipset starts supporting nomatch & enhance this to allow versions greater than that
     if [ "$Ipset_Version" == "ipset v6.29" ]; then
         let Ipset_Nomatch=0
     else
         let Ipset_Nomatch=1
     fi
-    Debug "Ipset_Version = $Ipset_Version ($Ipset_Nomatch)" 1
+    debug "Ipset_Version = $Ipset_Version ($Ipset_Nomatch)" 1
 
     if [ "$Ipset_Name" == "" ]; then
-        Aborting "Ipset_Name is empty" 3
+        aborting "Ipset_Name is empty" 3
     fi
-    Debug "$FUNCNAME Ipset_Name = $Ipset_Name"
+    debug "$FUNCNAME Ipset_Name = $Ipset_Name" 15
 
     Readlink_0=$(readlink -e $Zero 2> /dev/null)
     if [ "$Readlink_0" == "" ]; then
-        Aborting "Readlink_0 Zero failed" 3
+        aborting "Readlink_0 Zero failed" 3
     fi
-    Debug "$FUNCNAME Readlink_0 = $Readlink_0" 1
+    debug "$FUNCNAME Readlink_0 = $Readlink_0" 1
 
     Timestamp=$(date +%Y%m%d%H%M%S.%N)
-    Debug "$FUNCNAME Timestamp = $Timestamp"
+    debug "$FUNCNAME Timestamp = $Timestamp" 15
 
     if [ "$Tmp_Dir" == "" ]; then
         Tmp_Dir="/var/tmp"
@@ -768,40 +778,41 @@ function Labl_Init() {
     if [ ! -d "$Tmp_Dir" ]; then
         mkdir -p "$Tmp_Dir"
         if [ $? -ne 0 ]; then
-            Aborting "failed to make temp directory '$Tmp_Dir'"
+            aborting "failed to make temp directory '$Tmp_Dir'"
         fi
     fi
 
     if [ ! -d "$Tmp_Dir" ] || [ ! -w "$Tmp_Dir" ]; then
-        Aborting "'$Tmp_Dir' temporary directory not writable"
+        aborting "'$Tmp_Dir' temporary directory not writable"
     fi
 
 }
 
 # load lists of validated ips from file(s)
-function Labl_Load() {
-    Debug "$FUNCNAME Function = $FUNCNAME" 20
+function lablLoad() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     if [ "$1" == "" ]; then
-        Debug "$FUNCNAME passed no arguments to $FUNCNAME"
+        debug "$FUNCNAME passed no arguments to $FUNCNAME" 15
         return 1
     fi
-    Debug "$FUNCNAME arguments = $(echo $@)" 18
+
+    debug "$FUNCNAME arguments = $(echo $@)" 18
 
     local load_files=()
 
     local load_candidates=($@)
     for load_candidate in ${load_candidates[@]}; do
-        Debug "$FUNCNAME load_candidate = ${load_candidate}" 15
+        debug "$FUNCNAME load_candidate = ${load_candidate}" 15
         if [ -r $load_candidate ]; then
-            Debug "$FUNCNAME load_candidate = $load_candidate (readable)" 10
+            debug "$FUNCNAME load_candidate = $load_candidate (readable)" 10
             load_files+=($load_candidate)
         else
-            Debug "$FUNCNAME load_candidate = $load_candidate (not readable)" 10
+            debug "$FUNCNAME load_candidate = $load_candidate (not readable)" 10
         fi
         unset load_candidate
     done
-    Debug "$FUNCNAME load_files = $(echo ${load_files[@]})" 10
+    debug "$FUNCNAME load_files = $(echo ${load_files[@]})" 10
 
     # load ip(s)
 
@@ -811,7 +822,7 @@ function Labl_Load() {
 
         local load_ip
         for load_ip in $(cat "${load_files[@]}" | grep -ve "^#" | sort -uV); do
-            Debug "$FUNCNAME load_ip = $load_ip" 10
+            debug "$FUNCNAME load_ip = $load_ip" 10
 
             # skip empty lines
             if [ "${load_ip}" == "" ]; then
@@ -824,22 +835,22 @@ function Labl_Load() {
             fi
 
             let local valid_load_ip=1
-            if IPv4_Valid "$load_ip"; then
+            if ipv4Valid "$load_ip"; then
                 let local valid_load_ip=0
                 if [[ "$load_ip" != *"/"* ]]; then
                     load_ip+="/32"
                 fi
             else
-                if IP_Valid "$load_ip"; then
+                if ipValid "$load_ip"; then
                     let local valid_load_ip=0
                 fi
             fi
 
             if [ $valid_load_ip -eq 0 ]; then
-                Debug "$FUNCNAME $Lists_Name load ip = $load_ip" 10
+                debug "$FUNCNAME $Lists_Name load ip = $load_ip" 10
                 load_ips+=($load_ip)
             else
-                _Error "ignoring invalid IP '$load_ip' in $(grep -Fl $load_ip ${load_files[@]})" NOTICE
+                _error "ignoring invalid IP '$load_ip' in $(grep -Fl $load_ip ${load_files[@]})" NOTICE
             fi
         done
         unset load_ip
@@ -854,15 +865,16 @@ function Labl_Load() {
 }
 
 # output list of standard locations found for a given filename that's readable
-function Labl_Load_Files() {
-    Debug "$FUNCNAME Function = $FUNCNAME" 20
+function lablLoadFiles() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     local load_files="$1"
     if [ "$load_files" == "" ]; then
-        Debug "$FUNCNAME passed no arguments to $FUNCNAME" 1
+        debug "$FUNCNAME passed no arguments to $FUNCNAME" 1
         return 1
     fi
-    Debug "$FUNCNAME load_files = $load_files" 15
+
+    debug "$FUNCNAME load_files = $load_files" 25
 
     local load_labl_file="$2"
     local load_candidates=()
@@ -870,16 +882,16 @@ function Labl_Load_Files() {
         load_candidates=($load_files)
     else
         load_labl_file=$(basename "$load_labl_file")
-        Debug "$FUNCNAME load_labl_file = $load_labl_file" 15
+        debug "$FUNCNAME load_labl_file = $load_labl_file" 20
 
         # labl candidates
-        load_candidates+=(/etc/$load_labl_file)
+        load_candidates+=(/etc/labl.d/$load_labl_file)
 
         if [ "$Readlink_0" == "$Zero" ]; then
-            load_candidates+=($(dirname $(dirname $Zero))/etc/$load_labl_file)
+            load_candidates+=($(dirname $(dirname $Zero))/etc/labl.d/$load_labl_file)
         else
-            local labl_0=$(dirname $(dirname $Zero))/etc/$load_labl_file
-            local labl_readlink_0=$(dirname $(dirname $Readlink_0))/etc/$load_labl_file
+            local labl_0=$(dirname $(dirname $Zero))/etc/labl.d/$load_labl_file
+            local labl_readlink_0=$(dirname $(dirname $Readlink_0))/etc/labl.d/$load_labl_file
             if [ "$labl_0" == "$labl_readlink_0" ]; then
                 load_candidates+=($labl_0)
             else
@@ -889,21 +901,21 @@ function Labl_Load_Files() {
         fi
         unset labl_0 labl_readlink_0
     fi
-    Debug "$FUNCNAME load_candidates = $(echo ${load_candidates[@]})" 15
+    debug "$FUNCNAME load_candidates = $(echo ${load_candidates[@]})" 25
 
     local load_files=()
     for load_candidate in ${load_candidates[@]}; do
-        Debug "$FUNCNAME load_candidate = ${load_candidate}" 15
+        debug "$FUNCNAME load_candidate = ${load_candidate}" 25
         if [ -r $load_candidate ]; then
-            Debug "$FUNCNAME load_candidate = $load_candidate (readable)" 10
+            debug "$FUNCNAME load_candidate = $load_candidate (readable)" 10
             load_files+=($load_candidate)
         else
-            Debug "$FUNCNAME load_candidate = $load_candidate (not readable)" 10
+            debug "$FUNCNAME load_candidate = $load_candidate (not readable)" 10
         fi
         unset load_candidate
     done
 
-    Debug "$FUNCNAME load_files = $(echo ${load_files[@]})" 13
+    debug "$FUNCNAME load_files = $(echo ${load_files[@]})" 13
 
     if [[ "${load_files[@]}" ]]; then
         echo "${load_files[@]}"
@@ -914,31 +926,31 @@ function Labl_Load_Files() {
 }
 
 # load named blacklists into global $Blacklists & $Blacklists_Files
-function Labl_Load_Blacklists() {
-    Debug "$FUNCNAME Function = $FUNCNAME" 20
+function lablLoadBlacklists() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     if [ "$1" == "" ]; then
         local -l list_labl=blacklist.labl
     else
         list_labl="$1"
     fi
-    Debug "$FUNCNAME list_labl = $list_labl" 15
+    debug "$FUNCNAME list_labl = $list_labl" 15
 
     if [[ ${Blacklists[@]} ]]; then
         if [[ ${Blacklists_Files[@]} ]]; then
-            Debug "$FUNCNAME persistent blacklists already loaded" 10
+            debug "$FUNCNAME persistent blacklists already loaded" 10
             return 0
         fi
     fi
 
-    Blacklists_Files=($(Labl_Load_Files Blacklists blacklist.labl))
-    Debug "$FUNCNAME Blacklists_Files = $(echo ${Blacklists_Files[@]})" 10
+    Blacklists_Files=($(lablLoadFiles Blacklists blacklist.labl))
+    debug "$FUNCNAME Blacklists_Files = $(echo ${Blacklists_Files[@]})" 10
 
     Blacklists=()
     if [ "$Blacklists_Files" != "" ]; then
         local blacklist
-        for blacklist in $(Labl_Load "${Blacklists_Files[@]}"); do
-            Debug "$FUNCNAME blacklist = $blacklist" 13
+        for blacklist in $(lablLoad "${Blacklists_Files[@]}"); do
+            debug "$FUNCNAME blacklist = $blacklist" 13
             Blacklists+=($blacklist)
         done
         unset blacklist
@@ -961,31 +973,31 @@ function Labl_Load_Blacklists() {
 }
 
 # load named whitelists into global $Whitelists & $Whitelists_Files
-function Labl_Load_Whitelists() {
-    Debug "$FUNCNAME Function = $FUNCNAME" 20
+function lablLoadWhitelists() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     if [ "$1" == "" ]; then
         local -l list_labl=whitelist.labl
     else
         list_labl="$1"
     fi
-    Debug "$FUNCNAME list_labl = $list_labl" 15
+    debug "$FUNCNAME list_labl = $list_labl" 15
 
     if [[ ${Whitelists[@]} ]]; then
         if [[ ${Whitelists_Files[@]} ]]; then
-            Debug "$FUNCNAME persistent whitelists already loaded" 10
+            debug "$FUNCNAME persistent whitelists already loaded" 10
             return 0
         fi
     fi
 
-    Whitelists_Files=($(Labl_Load_Files Whitelists whitelist.labl))
-    Debug "$FUNCNAME Whitelists_Files = $(echo ${Whitelists_Files[@]})" 10
+    Whitelists_Files=($(lablLoadFiles Whitelists whitelist.labl))
+    debug "$FUNCNAME Whitelists_Files = $(echo ${Whitelists_Files[@]})" 10
 
     Whitelists=()
     if [ "$Whitelists_Files" != "" ]; then
         local whitelist
-        for whitelist in $(Labl_Load "${Whitelists_Files[@]}"); do
-            Debug "$FUNCNAME whitelist = $whitelist" 13
+        for whitelist in $(lablLoad "${Whitelists_Files[@]}"); do
+            debug "$FUNCNAME whitelist = $whitelist" 13
             Whitelists+=($whitelist)
         done
         unset whitelist
@@ -1008,8 +1020,8 @@ function Labl_Load_Whitelists() {
 }
 
 # remove an ip address or range from an ipset
-function Labl_Remove() {
-    Debug "$FUNCNAME Function = $FUNCNAME" 20
+function lablRemove() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     if [ "$1" == "" ]; then
         local ip="$IP_Address"
@@ -1018,7 +1030,7 @@ function Labl_Remove() {
     fi
 
     if [ "$ip" == "" ]; then
-        Debug "$FUNCNAME ip is empty"
+        debug "$FUNCNAME ip is empty" 15
         return 1
     fi
 
@@ -1055,16 +1067,16 @@ function Labl_Remove() {
         local quiet=1
     fi
 
-    if IPv4_Valid "$ip"; then
+    if ipv4Valid "$ip"; then
         local ip_families=("inet")
     else
-        if IPv4_Valid_CIDR "$ip"; then
+        if ipv4ValidCidr "$ip"; then
             local ip_families=("inet")
         else
-            if IPv6_Valid "$ip"; then
+            if ipv6Valid "$ip"; then
                 local ip_families=("inet6")
             else
-                if IPv6_Valid_CIDR "$ip"; then
+                if ipv6ValidCidr "$ip"; then
                     local ip_families=("inet6")
                 else
                     local ip_families=(${IP_Families[@]})
@@ -1072,7 +1084,7 @@ function Labl_Remove() {
             fi
         fi
     fi
-    Debug "ip_families = ${ip_families[@]}" 7
+    debug "ip_families = ${ip_families[@]}" 7
 
     for ip_family in ${ip_families[@]}; do
 
@@ -1081,11 +1093,11 @@ function Labl_Remove() {
         #local quiet=1
 
         if [ $blacklist -eq 0 ]; then
-            Debug "$FUNCNAME ip = $ip ($ip_family) blacklist"
+            debug "$FUNCNAME ip = $ip ($ip_family) blacklist" 15
 
-            if Labl_Check "$ip" blacklist quiet; then
+            if lablCheck "$ip" blacklist quiet; then
                 ipset del ${Ipset_Name}_${ip_family} $ip
-                if Labl_Check "$ip" blacklist quiet; then
+                if lablCheck "$ip" blacklist quiet; then
                     echo "[WARNING] $ip is still in blacklist (manually check the CIDR ranges)"
                 else
                     local blacklist_removed=0
@@ -1106,11 +1118,11 @@ function Labl_Remove() {
         fi
 
         if [ $whitelist -eq 0 ]; then
-            Debug "$FUNCNAME ip = $ip ($ip_family) whitelist"
+            debug "$FUNCNAME ip = $ip ($ip_family) whitelist" 15
 
-            if Labl_Check "$ip" whitelist quiet; then
+            if lablCheck "$ip" whitelist quiet; then
                 ipset del ${Ipset_Name}_${ip_family} $ip
-                if Labl_Check "$ip" whitelist quiet; then
+                if lablCheck "$ip" whitelist quiet; then
                     echo "[WARNING] $ip is still in whitelist (manually check the CIDR ranges)"
                 else
                     local whitelist_removed=0
@@ -1135,8 +1147,8 @@ function Labl_Remove() {
 }
 
 # check & if needed, create ipsets and iptables/ip6tables rules
-function Labl_Start() {
-    Debug "$FUNCNAME Function = $FUNCNAME" 20
+function lablStart() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     local rc=0
 
@@ -1148,7 +1160,7 @@ function Labl_Start() {
             table_exec="ip6tables"
         fi
 
-        Debug "$FUNCNAME check $table_exec $ip_family ipset" 10
+        debug "$FUNCNAME check $table_exec $ip_family ipset" 10
 
         # if needed, create ${ip_family} set
         ipset -q -t list ${Ipset_Name}_${ip_family} &> /dev/null
@@ -1159,7 +1171,7 @@ function Labl_Start() {
             if [ $? -eq 0 ]; then
                 echo "[+] ipset ${Ipset_Name}_${ip_family} created"
             else
-                Aborting "[ERROR] FAILED to ipset create ${Ipset_Name}_${ip_family} $ipset_type hashsize $Ipset_Hashsize maxelem $Ipset_Maxelem family ${ip_family}" 3
+                aborting "[ERROR] FAILED to ipset create ${Ipset_Name}_${ip_family} $ipset_type hashsize $Ipset_Hashsize maxelem $Ipset_Maxelem family ${ip_family}" 3
             fi
         else
             # set exists, great
@@ -1168,9 +1180,9 @@ function Labl_Start() {
             fi
         fi
 
-        Debug "$FUNCNAME check $table_exec $ip_family rule" 10
+        debug "$FUNCNAME check $table_exec $ip_family rule" 10
 
-        # iptables/ip6tables bug ...; sometimes they doesn't produce results on the first try ...
+        # iptables/ip6tables bug ...; sometimes results aren't produced on the first try ... :/
         local table_count=0
 
         let local table_try=3
@@ -1182,7 +1194,7 @@ function Labl_Start() {
             fi
             ((--table_try))
         done
-        Debug "$FUNCNAME $table_exec $ip_family table_try = $table_try" 10
+        debug "$FUNCNAME $table_exec $ip_family table_try = $table_try" 10
 
         if [ $table_count -eq 0 ]; then
             # insert [first rule]
@@ -1190,7 +1202,7 @@ function Labl_Start() {
             if [ $? -eq 0 ]; then
                 echo "[+] $table_exec --match-set ${Ipset_Name}_${ip_family} started"
             else
-                Aborting "[ERROR] FAILED to $table_exec -I INPUT 1 -m set --match-set ${Ipset_Name}_${ip_family} src -j DROP" 3
+                aborting "[ERROR] FAILED to $table_exec -I INPUT 1 -m set --match-set ${Ipset_Name}_${ip_family} src -j DROP" 3
             fi
         else
             if [ $table_count -eq 1 ]; then
@@ -1198,7 +1210,7 @@ function Labl_Start() {
                     echo "[+] $table_exec --match-set ${Ipset_Name}_${ip_family} running"
                 fi
             else
-                Aborting "[ERROR] $table_exec --match-set ${Ipset_Name}_${ip_family} is loaded $table_count times, try restarting" 3
+                aborting "[ERROR] $table_exec --match-set ${Ipset_Name}_${ip_family} is loaded $table_count times, try restarting" 3
             fi
         fi
 
@@ -1208,9 +1220,9 @@ function Labl_Start() {
         printf "\n"
     fi
 
-    Labl_Load_Blacklists
+    lablLoadBlacklists
     #echo "Blacklists = ${Blacklists[@]}"
-    Labl_Load_Whitelists
+    lablLoadWhitelists
     #echo "Whitelists = ${Whitelists[@]}"
 
     if [ $Verbose_Flag -eq 0 ]; then
@@ -1223,8 +1235,8 @@ function Labl_Start() {
 
         local blacklist
         for blacklist in ${Blacklists[@]}; do
-            Debug "$FUNCNAME blacklist = $blacklist" 10
-            Labl_Add $blacklist blacklist
+            debug "$FUNCNAME blacklist = $blacklist" 10
+            lablAdd $blacklist blacklist
         done
         unset blacklist
 
@@ -1233,8 +1245,8 @@ function Labl_Start() {
         # here
         local whitelist
         for whitelist in ${Whitelists[@]}; do
-            Debug "$FUNCNAME whitelist = $whitelist" 10
-            Labl_Add $whitelist whitelist
+            debug "$FUNCNAME whitelist = $whitelist" 10
+            lablAdd $whitelist whitelist
         done
         unset whitelist
 
@@ -1250,8 +1262,8 @@ function Labl_Start() {
 }
 
 # list contents of all ipsets & iptables rules
-function Labl_Status() {
-    Debug "$FUNCNAME Function = $FUNCNAME" 20
+function lablStatus() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     let local labl_running=1
 
@@ -1278,7 +1290,7 @@ function Labl_Status() {
             table_exec="ip6tables"
         fi
 
-        Debug "$FUNCNAME check $table_exec $ip_family ipset" 10
+        debug "$FUNCNAME check $table_exec $ip_family ipset" 10
 
         ipset -q -t list ${Ipset_Name}_${ip_family} &> /dev/null
         if [ $? -eq 0 ]; then
@@ -1289,7 +1301,7 @@ function Labl_Status() {
                 cat /var/tmp/${Ipset_Name}_${ip_family}.status.${Timestamp}
             fi
 
-            Debug "$FUNCNAME check $table_exec $ip_family rule" 10
+            debug "$FUNCNAME check $table_exec $ip_family rule" 10
 
             # iptables/ip6tables bug ...; sometimes they doesn't produce results on the first try ...
             local table_count=0
@@ -1303,7 +1315,7 @@ function Labl_Status() {
                 fi
                 ((--table_try))
             done
-            Debug "$FUNCNAME table_try = $table_try" 10
+            debug "$FUNCNAME table_try = $table_try" 10
             echo
             if [ $table_count -eq 0 ]; then
                 echo "[-] $table_exec --match-set ${Ipset_Name}_${ip_family} is NOT loaded"
@@ -1316,8 +1328,8 @@ function Labl_Status() {
                     echo
                 fi
 
-                Labl_Load_Blacklists
-                Labl_Load_Whitelists
+                lablLoadBlacklists
+                lablLoadWhitelists
 
                 local labl_blacklist_count=$(sed '1,/^Members:$/d' /var/tmp/${Ipset_Name}_${ip_family}.status.${Timestamp} | grep -v nomatch | wc -l)
                 if [ $labl_blacklist_count -eq 0 ]; then
@@ -1401,8 +1413,8 @@ function Labl_Status() {
 }
 
 # remove all ip family rules & ipsets
-function Labl_Stop() {
-    Debug "$FUNCNAME Function = $FUNCNAME" 20
+function lablStop() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     local rc=0
 
@@ -1414,7 +1426,7 @@ function Labl_Stop() {
             table_exec="ip6tables"
         fi
 
-        Debug "$FUNCNAME check $table_exec $ip_family rule" 10
+        debug "$FUNCNAME check $table_exec $ip_family rule" 10
 
         # iptables/ip6tables bug ...; sometimes they doesn't produce results on the first try ...
         local table_count=0
@@ -1429,7 +1441,7 @@ function Labl_Stop() {
             fi
             ((--table_try))
         done
-        Debug "$FUNCNAME $table_exec $ip_family table_count = $table_count, table_try = $table_try" 10
+        debug "$FUNCNAME $table_exec $ip_family table_count = $table_count, table_try = $table_try" 10
 
         if [ $table_count -gt 0 ]; then
             let local table_try_max=$table_try_max+$table_count
@@ -1440,7 +1452,7 @@ function Labl_Stop() {
         let table_stopped=0
         if [ $table_count -gt 0 ]; then
             while [ $table_try_max -gt 0 ]; do
-                Debug "$FUNCNAME $table_exec $ip_family table_count = $table_count, table_try = $table_try, table_try_max = $table_try_max" 10
+                debug "$FUNCNAME $table_exec $ip_family table_count = $table_count, table_try = $table_try, table_try_max = $table_try_max" 10
                 $table_exec -D INPUT 1 -m set --match-set ${Ipset_Name}_${ip_family} src &> /dev/null
                 if [ $? -eq 0 ]; then
                     let table_stopped=$table_stopped+1
@@ -1448,7 +1460,7 @@ function Labl_Stop() {
                 ((--table_try_max))
             done
         else
-            Debug "$FUNCNAME $table_exec --match-set ${Ipset_Name}_${ip_family} stopped" 10
+            debug "$FUNCNAME $table_exec --match-set ${Ipset_Name}_${ip_family} stopped" 10
         fi
 
         # second time, check to be sure it's stopped
@@ -1463,7 +1475,7 @@ function Labl_Stop() {
             fi
             ((--table_try))
         done
-        Debug "$FUNCNAME $table_exec $ip_family table_count = $table_count, table_try = $table_try" 10
+        debug "$FUNCNAME $table_exec $ip_family table_count = $table_count, table_try = $table_try" 10
 
         if [ $table_count -gt 0 ]; then
             echo "[ERROR] FAILED to remove $table_exec --match-set ${Ipset_Name}_${ip_family}"
@@ -1505,9 +1517,19 @@ function Labl_Stop() {
 
 }
 
+# provide summary of stateful/ephemeral lists
+function lablSummary() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
+
+    lablLoadBlacklists
+    #echo "Blacklists = ${Blacklists[@]}"
+    #lablLoadWhitelists
+    #echo "Whitelists = ${Whitelists[@]}"
+}
+
 # cli usage
-function Usage() {
-    Debug "$FUNCNAME Function = $FUNCNAME" 20
+function usage() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     local ip_address="<ip|ip/cidr>"
 
@@ -1517,7 +1539,7 @@ function Usage() {
         local usage_message="$usage_header <"
         for Option in ${Options[@]}; do
             # these options do NOT require an ip|ip/cdr
-            if [ "$Option" == "auto" ] || [ "$Option" == "restart" ] || [ "$Option" == "start" ] || [ "$Option" == "status" ] || [ "$Option" == "stop" ]; then
+            if [ "$Option" == "auto" ] || [ "$Option" == "restart" ] || [ "$Option" == "start" ] || [ "$Option" == "status" ] || [ "$Option" == "stop" ] || [ "$Option" == "summary" ]; then
                 continue
             fi
             usage_message+="$Option|"
@@ -1528,7 +1550,7 @@ function Usage() {
         if [ "$Ipset_Mode" == "" ]; then
             local usage_message+=$usage_footer
         fi
-        usage_message+="\n-or-\n$usage_header <auto|restart|start|status|stop>"
+        usage_message+="\n-or-\n$usage_header <auto|restart|start|status|stop|summary>"
     else
         if [ "$Option" == "$Flag" ]; then
             local usage_message="$usage_header $Option $ip_address"
@@ -1549,71 +1571,75 @@ function Usage() {
 
 # Main
 
-Debug "0 = $0" 5
-Debug "Debug = $Debug" 0
+debug "0 = $0" 5
+debug "Debug = $Debug" 1
 
-Basename_0=$(basename $0)
-Debug "Basename_0 = $Basename_0"
+debug "Basename_0 = $Basename_0" 1
 
-Dirname_0="$(dirname $0)"
 if [ "$Dirname_0" == "." ]; then
     Dirname_0="$(pwd)"
 fi
-Debug "Dirname_0 = $Dirname_0" 5
+debug "Dirname_0 = $Dirname_0" 5
 
 Zero="$Dirname_0/$Basename_0"
-Debug "Zero = $Zero"
+debug "Zero = $Zero" 1
 
-Labl_Init $@
+lablInit $@
 
 # supported options without other arguments are restart, start, status, stop
 
 # restart is a special option, exit
 if [ "$Option" == "restart" ]; then
-    Labl_Stop
-    Labl_Start
+    lablStop
+    lablStart
     exit
 fi
 
 # start is a special option, exit
 if [ "$Option" == "start" ]; then
-    Labl_Start
+    lablStart
     exit
 fi
 
 # status is a special option, exit
 if [ "$Option" == "status" ]; then
-    Labl_Status
+    lablStatus
     exit
 fi
 
 # stop is a special option, exit
 if [ "$Option" == "stop" ]; then
-    Labl_Stop
+    lablStop
     exit
 fi
 
-# auto is super special, it requires Labl_Start but no IP validation
+# summary is a special option, exit
+if [ "$Option" == "summary" ]; then
+    lablSummary
+    exit
+fi
+
+# auto is super special, it requires lablStart but no IP validation
 if [ "$Option" == "auto" ]; then
-    Labl_Start
-    Labl_Auto
+    lablStart
+    lablAuto
 else
     # all other supported options require a valid(ated) IP Address, ipset(s), and iptables/ip6tables rules
-    Labl_Start
+    lablStart
 fi
 
 if [ "$Option" == "add" ]; then
-    Labl_Add "$IP_Address" "$Ipset_Mode"
+    lablAdd "$IP_Address" "$Ipset_Mode"
     exit
 fi
 
 if [ "$Option" == "check" ]; then
-    Labl_Check "$IP_Address"
+    lablCheck "$IP_Address"
     exit
 fi
 
 if [ "$Option" == "remove" ]; then
-    Labl_Remove "$IP_Address"
+    lablRemove "$IP_Address"
     exit
 fi
 
