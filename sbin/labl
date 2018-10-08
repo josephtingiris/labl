@@ -769,7 +769,7 @@ function lablFindLists() {
                 else
                     debug "$FUNCNAME candidate = $candidate (not readable)" 30
                 fi
-            done <<< "$(find "${find_dir}" -name "*${find_lists}*" 2> /dev/null | sort -u)"
+            done <<< "$(find "${find_dir}" -maxdepth 1 -type f -name "*${find_lists}*" 2> /dev/null | sort -u)" # only files in this directory; do not recurse
             unset candidate
         fi
     done
