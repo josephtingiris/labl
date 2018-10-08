@@ -6,7 +6,7 @@
 
 PATH=/bin:/sbin:/usr/bin:/usr/sbin
 
-Log_File=/opt/zimbra/audit.log
+Log_File=/opt/zimbra/log/audit.log
 if [ ! -r "$Log_File" ]; then
     exit
 fi
