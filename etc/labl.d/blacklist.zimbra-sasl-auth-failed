@@ -1,0 +1,27 @@
+#!/bin/bash
+
+# 20181008, jtingiris
+
+PATH=/bin:/sbin:/usr/bin:/usr/sbin
+
+Log_File=/var/log/zimbra.log
+if [ ! -r "$Log_File" ]; then
+    exit
+fi
+
+(# output a unqiue list of IP addresses matching the following signature
+
+egrep -e 'SASL.*+authentication failed:|auth failure:' "$Log_File" 2> /dev/null \
+    | egrep -e 'warning:|do_auth' \
+    | awk '{$1=$2=$3=$4=$5=""; print $0}' \
+    | awk '/warning:/ {printf "\n%s\n",$0;next} {printf "%s ",$0}' \
+    | sed '$!N;s/\n\s*do_auth//;P;D' \
+    | egrep warning: \
+    | awk -F\] '{print $1}' \
+    | awk -F\[ '{print $NF}' \
+    | egrep -e'^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$' \
+    | sort -uV
+
+) 2> /dev/null
+
+exit $?

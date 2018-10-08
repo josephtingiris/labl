@@ -53,8 +53,6 @@ if [ "$USER" != "root" ]; then
     aborting "must be root" 3
 fi
 
-Tmp_Dir=/opt/labl/tmp
-
 # print formatted output to stdout
 function _echo() {
     debug "$FUNCNAME Function = $FUNCNAME" 50
@@ -940,6 +938,8 @@ function lablInit() {
 
     Timestamp=$(date +%Y%m%d%H%M%S.%N)
     debug "$FUNCNAME Timestamp = $Timestamp" 14
+
+    Tmp_Dir=$(readlink -e "${Dirname_0}/../tmp")
 
     if [ "$Tmp_Dir" == "" ]; then
         Tmp_Dir="/var/tmp"
