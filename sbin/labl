@@ -1563,7 +1563,7 @@ function lablStatus() {
                             unset blacklist_inet
                         fi
                         if [ $blacklists_file_count -eq 0 ]; then
-                            echo "!! empty blacklist !!"
+                            echo "!! empty $ip_family blacklist !!"
                         fi
                         Status_Flag=0
                         echo
