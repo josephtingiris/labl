@@ -32,3 +32,4 @@ along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 * [The GNU Operating System.](https://www.gnu.org/software/bash/) For awk, basename, bash, cut, date, dirname, readlink, & sed.
 * [The netfilter.org project.](https://netfilter.org/) For ipset, iptables, and ip6tables.
+* [The University of Duisburg-Essen / Institute for Experimental Mathematics / Computer Networking Technology Group and Thomas Dreibholz.](https://www.uni-due.de/~be0001/subnetcalc/) For subnetcalc.
