@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# block auth failures to zimbra smtps (mta)
+
 # 20181008, jtingiris
 
 PATH=/bin:/sbin:/usr/bin:/usr/sbin

@@ -1,0 +1,24 @@
+#!/bin/bash
+
+# block auth failures to zimbra imap from locked out accounts
+
+# 20181008, jtingiris
+
+PATH=/bin:/sbin:/usr/bin:/usr/sbin
+
+Log_File=/opt/zimbra/audit.log
+if [ ! -r "$Log_File" ]; then
+    exit
+fi
+
+(# output a unqiue list of IP addresses matching the following signature
+
+grep protocol=imap "$Log_File" 2> /dev/null \
+    | grep error=authentication \
+    | grep 'account(or domain) status is closed' \
+    | awk -Foip= '{print $2}' | awk -F\; '{print $1}' \
+    | sort -uV
+
+) 2> /dev/null
+
+exit $?
