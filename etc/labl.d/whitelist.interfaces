@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# add local interface addresses to the whitelist
+
+ip a s | grep inet | awk '{print $2}'
