@@ -46,8 +46,10 @@ else
     let Debug=$DEBUG+0
 fi
 
-Basename_0=$(basename $0)
-Dirname_0="$(dirname $0)"
+if [ "$USER" != "root" ]; then
+    aborting "must be root" 3
+fi
+
 Tmp_Dir=/opt/labl/tmp
 
 # print formatted output to stdout
@@ -95,9 +97,6 @@ function aborting() {
     exit $RC
 }
 
-if [ -r "${Dirname_0}/../include/debug-bash/Debug.bash" ]; then
-    source "${Dirname_0}/../include/debug-bash/Debug.bash"
-else
     # print debug output to stderr if global debug is greater than or equal to local debug_level
     function debug() {
         if [ $Debug -eq 0 ]; then
@@ -115,7 +114,6 @@ else
             _echo "$debug_message" "DEBUG(${Debug},${debug_level})"
         fi
     }
-fi
 
 # regex to validate hostname
 function hostnameValid() {
@@ -761,10 +759,6 @@ function lablFindLists() {
 function lablInit() {
     debug "$FUNCNAME Function = $FUNCNAME" 50
 
-    if [ "$USER" != "root" ]; then
-        aborting "must be root" 3
-    fi
-
     # ensure executable dependencies are available
     Dependencies=()
     Dependencies+=(awk)
@@ -790,6 +784,25 @@ function lablInit() {
         fi
     done
     unset dependency
+
+    Basename_0=$(basename $0)
+    Dirname_0="$(dirname $0)"
+
+    if [ "$Dirname_0" == "." ]; then
+        Dirname_0="$PWD"
+    fi
+
+    Zero="$Dirname_0/$Basename_0"
+
+    if [ -r "${Dirname_0}/../include/debug-bash/Debug.bash" ]; then
+        source "${Dirname_0}/../include/debug-bash/Debug.bash"
+    fi
+
+    debug "0 = $0" 5
+    debug "Debug = $Debug" 1
+    debug "Basename_0 = $Basename_0" 1
+    debug "Dirname_0 = $Dirname_0" 5
+    debug "Zero = $Zero" 1
 
     if [ "$Basename_0" == "blacklist" ]; then
         Ipset_Mode="blacklist"
@@ -1729,19 +1742,6 @@ function usageOptionSingle() {
 }
 
 # Main
-
-debug "0 = $0" 5
-debug "Debug = $Debug" 1
-
-debug "Basename_0 = $Basename_0" 1
-
-if [ "$Dirname_0" == "." ]; then
-    Dirname_0="$(pwd)"
-fi
-debug "Dirname_0 = $Dirname_0" 5
-
-Zero="$Dirname_0/$Basename_0"
-debug "Zero = $Zero" 1
 
 lablInit $@
 
