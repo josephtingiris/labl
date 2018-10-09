@@ -1,5 +1,5 @@
 #!/bin/bash
 
-# add local interface addresses to the whitelist
+# labl whitelist for local interface subnets
 
-ip a s | grep inet | awk '{print $2}'
+ip a s | grep inet | awk '{print $2}' 2> /dev/null

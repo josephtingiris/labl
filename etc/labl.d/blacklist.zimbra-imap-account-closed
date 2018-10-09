@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# block auth failures to zimbra imap from locked out accounts
+# labl blacklist for blocking auth failures to zimbra imap from locked out accounts
 
 # 20181008, jtingiris
 

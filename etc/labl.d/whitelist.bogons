@@ -1,4 +1,5 @@
-# bogons; https://www.team-cymru.org/Services/Bogons/bogon-bn-agg.txt
+# labl whitelist for bogons
+# https://www.team-cymru.org/Services/Bogons/bogon-bn-agg.txt
 0.0.0.0/8
 10.0.0.0/8
 100.64.0.0/10
