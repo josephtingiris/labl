@@ -13,12 +13,12 @@ fi
 
 (# output a unqiue list of IP addresses matching the following signature
 
-for email_address in $(grep user\ not\ found "$Log_File" | awk -Fuser\ not\ found '{print $2}' | egrep -e '0.0.0.0:143|0.0.0.0:993' | awk '{print $1}' | sort -uV | sed -e '/:/s///g'); do
-    let client_count=$(grep :${email_address} "$Log_File" 2> /dev/null | awk -Fuser\ not\ found '{print $2}' | egrep -e '0.0.0.0:143|0.0.0.0:993' | sort -uV | awk -Fclient: '{print $2}' | awk -F: '{print $1}' | wc -l)
+for email_address in $(grep user\ not\ found "$Log_File" | awk -Fuser\ not\ found '{print $2}' | egrep -e '0.0.0.0:143|0.0.0.0:993' | awk '{print $1}' | sed -e '/:/s///g' | sort -uV); do
+    let client_count=$(grep :${email_address} "$Log_File" 2> /dev/null | awk -Fuser\ not\ found '{print $2}' | egrep -e '0.0.0.0:143|0.0.0.0:993' | awk -Fclient: '{print $2}' | awk -F: '{print $1}' | sort -uV | wc -l)
 
     if [ $client_count -gt 25 ]; then
         echo "# $email_address $client_count"
-        grep :${email_address} "$Log_File" 2> /dev/null | awk -Fuser\ not\ found '{print $2}' | egrep -e '0.0.0.0:143|0.0.0.0:993' | sort -uV | awk -Fclient: '{print $2}' | awk -F: '{print $1}'
+        grep :${email_address} "$Log_File" 2> /dev/null | awk -Fuser\ not\ found '{print $2}' | egrep -e '0.0.0.0:143|0.0.0.0:993' | awk -Fclient: '{print $2}' | awk -F: '{print $1}' | awk '{print $1}' | sort -uV
     fi
 
 done
