@@ -1,0 +1,28 @@
+#!/bin/bash
+
+# block auth failures to zimbra smtps (mta)
+
+# 20181008, jtingiris
+
+PATH=/bin:/sbin:/usr/bin:/usr/sbin
+
+Log_File=/opt/zimbra/log/audit.log
+if [ ! -r "$Log_File" ]; then
+    exit
+fi
+
+(# output a unqiue list of IP addresses matching the following signature
+
+for email_address in $(grep protocol=imap "$Log_File" | grep 'error=authentication failed for' | awk -Ffailed\ for '{print $2}' | awk -F, '{print $1}' | sed -e '/\[/s///g' -e '\/\]/s///g' | sort -u); do
+    let oip_count=$(grep "\[$email_address\]" "$Log_File" | awk -Foip= '{print $2}' | awk -F\; '{print $1}' | sort -u | wc -l)
+
+    if [ $oip_count -gt 25 ]; then
+        echo "# $email_address $oip_count"
+        grep "\[$email_address\]" "$Log_File" | awk -Foip= '{print $2}' | awk -F\; '{print $1}' | sort -uV
+    fi
+
+done
+
+) 2> /dev/null
+
+exit $?
