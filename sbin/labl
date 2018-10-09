@@ -473,61 +473,62 @@ function lablAuto() {
         lablStop
         lablStart
     else
-        local ipset_save=/var/tmp/labl.auto.save
-        lablSave $ipset_save
-
-        local ip_families
-        for ip_families in ${IP_Families[@]}; do
-            local ipset_families_save="${ipset_save}.${Ipset_Name}_${ip_families}"
-            if [ -f "${ipset_families_save}" ]; then
-                cp ${ipset_families_save} ${ipset_families_save}.new
-            else
-                aborting "[ERROR] can't find ${ipset_families_save}"
-            fi
-        done
-        unset ip_families
-
         lablLoadBlacklists blacklist
         lablLoadWhitelists whitelist
+    fi
 
-        local blacklist
-        for blacklist in ${Blacklists[@]}; do
-            debug "$FUNCNAME blacklist = $blacklist" 50
+    local ipset_save=/var/tmp/labl.auto.save
+    lablSave $ipset_save
 
-            if ipv4Valid "$blacklist"; then
+    local ip_families
+    for ip_families in ${IP_Families[@]}; do
+        local ipset_families_save="${ipset_save}.${Ipset_Name}_${ip_families}"
+        if [ -f "${ipset_families_save}" ]; then
+            cp ${ipset_families_save} ${ipset_families_save}.new
+        else
+            aborting "[ERROR] can't find ${ipset_families_save}"
+        fi
+    done
+    unset ip_families
+
+
+    local blacklist
+    for blacklist in ${Blacklists[@]}; do
+        debug "$FUNCNAME blacklist = $blacklist" 50
+
+        if ipv4Valid "$blacklist"; then
+            local ip_family=("inet")
+        else
+            if ipv4ValidCidr "$blacklist"; then
                 local ip_family=("inet")
             else
-                if ipv4ValidCidr "$blacklist"; then
-                    local ip_family=("inet")
-                else
-                    local ip_family=("inet6")
-                fi
+                local ip_family=("inet6")
             fi
+        fi
 
-            if [ "$ip_family" != "" ]; then
-                local ipset_family_save="${ipset_save}.${Ipset_Name}_${ip_family}"
-                echo add labl_inet $blacklist | sed -e '/\/32/s///g' >> ${ipset_family_save}.new
+        if [ "$ip_family" != "" ]; then
+            local ipset_family_save="${ipset_save}.${Ipset_Name}_${ip_family}"
+            echo add labl_inet $blacklist | sed -e '/\/32/s///g' >> ${ipset_family_save}.new
+        fi
+
+    done
+
+    local ip_families
+    for ip_families in ${IP_Families[@]}; do
+        local ipset_families_save="${ipset_save}.${Ipset_Name}_${ip_families}"
+        sort -ruV ${ipset_families_save}.new -o ${ipset_families_save}.new
+        local blacklist_add
+        for blacklist_add in $(diff ${ipset_families_save} ${ipset_families_save}.new 2> /dev/null | grep ^\> | awk '{print $NF}'); do
+            if [[ "$blacklist_add" != *"/"* ]]; then
+                lablAdd ${blacklist_add}/32 blacklist
+            else
+                lablAdd $blacklist_add blacklist
             fi
-
         done
+        unset blacklist_add
+    done
+    unset ip_families
 
-        local ip_families
-        for ip_families in ${IP_Families[@]}; do
-            local ipset_families_save="${ipset_save}.${Ipset_Name}_${ip_families}"
-            sort -ruV ${ipset_families_save}.new -o ${ipset_families_save}.new
-            local blacklist_add
-            for blacklist_add in $(diff ${ipset_families_save} ${ipset_families_save}.new 2> /dev/null | grep ^\> | awk '{print $NF}'); do
-                if [[ "$blacklist_add" != *"/"* ]]; then
-                    lablAdd ${blacklist_add}/32 blacklist
-                else
-                    lablAdd $blacklist_add blacklist
-                fi
-            done
-            unset blacklist_add
-        done
-        unset ip_families
-
-    fi
 }
 
 
@@ -749,7 +750,7 @@ function lablFindLists() {
 
     debug "$FUNCNAME find_lists = '$find_lists'" 33
 
-    local labl_etc_d=$(dirname $(dirname $Zero) 2> /dev/null)/etc/labl.d/
+    local labl_etc_d=$(dirname $(dirname $Readlink_0) 2> /dev/null)/etc/labl.d/
 
     local find_dirs=()
     find_dirs+=(/etc/labl.d)
@@ -825,11 +826,11 @@ function lablInit() {
         source "${Dirname_0}/../include/debug-bash/Debug.bash"
     fi
 
-    debug "0 = $0" 5
-    debug "Debug = $Debug" 1
-    debug "Basename_0 = $Basename_0" 1
-    debug "Dirname_0 = $Dirname_0" 5
-    debug "Zero = $Zero" 1
+    debug "$FUNCNAME 0 = $0" 5
+    debug "$FUNCNAME Debug = $Debug" 1
+    debug "$FUNCNAME Basename_0 = $Basename_0" 1
+    debug "$FUNCNAME Dirname_0 = $Dirname_0" 5
+    debug "$FUNCNAME Zero = $Zero" 1
 
     if [ "$Basename_0" == "blacklist" ]; then
         Ipset_Mode="blacklist"
@@ -1626,7 +1627,7 @@ function lablStatus() {
                             unset whitelist_inet
                         fi
                         if [ $whitelists_file_count -eq 0 ]; then
-                            echo "!! empty whitelist !!"
+                            echo "!! empty $ip_family whitelist !!"
                         fi
                         Status_Flag=0
                         echo
