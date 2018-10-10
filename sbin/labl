@@ -460,13 +460,15 @@ function lablAuto() {
 
     # check if labl is already running (properly)
     let local labl_running=0
-    local ip_families=(${IP_Families[@]})
-    for ip_family in ${ip_families[@]}; do
+
+    local ip_family
+    for ip_family in ${IP_Families[@]}; do
         ipset -q -t list ${Ipset_Name}_${ip_family} &> /dev/null
         if [ $? -ne 0 ]; then
             let local labl_running=1
         fi
     done
+    unset ip_family
 
     # if it's not running properly, then restart, else add *only new* addresses to the ipsets
     if [ $labl_running -eq 1 ]; then
@@ -480,16 +482,16 @@ function lablAuto() {
     local ipset_save=/var/tmp/labl.auto.save
     lablSave $ipset_save
 
-    local ip_families
-    for ip_families in ${IP_Families[@]}; do
-        local ipset_families_save="${ipset_save}.${Ipset_Name}_${ip_families}"
+    local ip_family
+    for ip_family in ${IP_Families[@]}; do
+        local ipset_families_save="${ipset_save}.${Ipset_Name}_${ip_family}"
         if [ -f "${ipset_families_save}" ]; then
             cp ${ipset_families_save} ${ipset_families_save}.new
         else
             aborting "[ERROR] can't find ${ipset_families_save}"
         fi
     done
-    unset ip_families
+    unset ip_family
 
 
     local blacklist
@@ -513,9 +515,9 @@ function lablAuto() {
 
     done
 
-    local ip_families
-    for ip_families in ${IP_Families[@]}; do
-        local ipset_families_save="${ipset_save}.${Ipset_Name}_${ip_families}"
+    local ip_family
+    for ip_family in ${IP_Families[@]}; do
+        local ipset_families_save="${ipset_save}.${Ipset_Name}_${ip_family}"
         sort -ruV ${ipset_families_save}.new -o ${ipset_families_save}.new
         local blacklist_add
         for blacklist_add in $(diff ${ipset_families_save} ${ipset_families_save}.new 2> /dev/null | grep ^\> | awk '{print $NF}'); do
@@ -527,7 +529,7 @@ function lablAuto() {
         done
         unset blacklist_add
     done
-    unset ip_families
+    unset ip_family
 
 }
 
@@ -1315,14 +1317,15 @@ function lablSave() {
         return 1
     fi
 
-    local ip_families=(${IP_Families[@]})
-    for ip_family in ${ip_families[@]}; do
+    local ip_family
+    for ip_family in ${IP_Families[@]}; do
         ipset_family_save="${ipset_save}.${Ipset_Name}_${ip_family}"
         if [ $Auto_Flag -eq 1 ]; then
             _echo "ipset save ${Ipset_Name}_${ip_family} to $ipset_family_save" SAVE
         fi
         ipset save ${Ipset_Name}_${ip_family} | sort -ruV > "$ipset_family_save"
     done
+    unset ip_family
 
 }
 
@@ -1332,8 +1335,8 @@ function lablStart() {
 
     local rc=0
 
-    local ip_families=(${IP_Families[@]})
-    for ip_family in ${ip_families[@]}; do
+    local ip_family
+    for ip_family in ${IP_Families[@]}; do
         if [ "$ip_family" == "inet" ]; then
             table_exec="iptables"
         else
@@ -1395,6 +1398,7 @@ function lablStart() {
         fi
 
     done
+    unset ip_family
 
     if [ $Verbose_Flag -eq 0 ]; then
         printf "\n"
@@ -1464,9 +1468,10 @@ function lablStatus() {
     local labl_inet6_blacklist_count=0
     local labl_inet6_whitelist_count=0
 
-    local ip_families_count=0
-    local ip_families=(${IP_Families[@]})
-    for ip_family in ${ip_families[@]}; do
+    local ip_family_count=0
+
+    local ip_family
+    for ip_family in ${ip_family[@]}; do
         if [ "$ip_family" == "inet" ]; then
             table_exec="iptables"
         else
@@ -1479,10 +1484,10 @@ function lablStatus() {
         if [ $? -eq 0 ]; then
             let local labl_running=0
 
-            if [ $ip_families_count -eq 0 ]; then
+            if [ $ip_family_count -eq 0 ]; then
                 echo "----------------------------------------------------------------"
                 echo
-                let ip_families_count=$ip_families_count+1
+                let ip_family_count=$ip_family_count+1
             fi
 
             ipset list ${Ipset_Name}_${ip_family} 2> /dev/null > /var/tmp/${Ipset_Name}_${ip_family}.status.${Timestamp}
@@ -1696,7 +1701,7 @@ function lablStatus() {
                 local permanent_qualifiers=0
 
                 local ip_family
-                for ip_family in ${ip_families[@]}; do
+                for ip_family in ${IP_Families[@]}; do
                     while read blacklist_ip; do
                         if ipv4Valid $blacklist_ip; then
                             local blacklist_qualifier=$(echo "$blacklist_ip" | awk -F\. '{print $1"."$2"."$3}')
@@ -1734,6 +1739,15 @@ function lablStatus() {
         echo "labl is NOT running, nothing is being ${Ipset_Mode}ed"
         echo
     fi
+
+    # clean up
+    local ip_family
+    for ip_family in ${IP_Families[@]}; do
+        if [ -r /var/tmp/${Ipset_Name}_${ip_family}.status.${Timestamp} ]; then
+            cat /var/tmp/${Ipset_Name}_${ip_family}.status.${Timestamp}
+        fi
+    done
+    unset ip_family
 
     exit 0
 }
