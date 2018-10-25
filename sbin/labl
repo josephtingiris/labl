@@ -842,21 +842,27 @@ function lablInit() {
 
     Zero="$Dirname_0/$Basename_0"
 
-    if [ -r "${Dirname_0}/../include/debug-bash/Debug.bash" ]; then
-        source "${Dirname_0}/../include/debug-bash/Debug.bash"
+    Readlink_0=$(readlink -e $Zero 2> /dev/null)
+    if [ "$Readlink_0" == "" ]; then
+        aborting "Readlink_0 Zero failed" 3
     fi
 
-    if [ -r "${Dirname_0}/../include/ip-bash/IP.bash" ]; then
-        source "${Dirname_0}/../include/ip-bash/IP.bash"
-    else
-        aborting "IP.bash failed to source"
+    if [ -r "$(dirname ${Readlink_0})/../include/debug-bash/Debug.bash" ]; then
+        source "$(dirname ${Readlink_0})/../include/debug-bash/Debug.bash"
     fi
 
     debug "$FUNCNAME 0 = $0" 5
     debug "$FUNCNAME Debug = $Debug" 1
     debug "$FUNCNAME Basename_0 = $Basename_0" 1
     debug "$FUNCNAME Dirname_0 = $Dirname_0" 5
+    debug "$FUNCNAME Readlink_0 = $Readlink_0" 1
     debug "$FUNCNAME Zero = $Zero" 1
+
+    if [ -r "$(dirname ${Readlink_0})/../include/ip-bash/IP.bash" ]; then
+        source "$(dirname ${Readlink_0})/../include/ip-bash/IP.bash"
+    else
+        aborting "IP.bash failed to source"
+    fi
 
     IP_Families=()
 
@@ -984,12 +990,6 @@ function lablInit() {
         aborting "Ipset_Name is empty" 3
     fi
     debug "$FUNCNAME Ipset_Name = $Ipset_Name" 14
-
-    Readlink_0=$(readlink -e $Zero 2> /dev/null)
-    if [ "$Readlink_0" == "" ]; then
-        aborting "Readlink_0 Zero failed" 3
-    fi
-    debug "$FUNCNAME Readlink_0 = $Readlink_0" 1
 
     Timestamp=$(date +%Y%m%d%H%M%S.%N)
     debug "$FUNCNAME Timestamp = $Timestamp" 14
