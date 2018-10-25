@@ -1,0 +1,4 @@
+# linux adaptive blacklist (labl)
+*/5 * * * * root [ -x /opt/labl/sbin/labl ] && /opt/labl/sbin/labl auto &>> /var/log/labl.log
+50 23 * * * root [ -x /opt/labl/sbin/labl ] && /opt/labl/sbin/labl status permanent &>> /var/log/labl.permanent.log
+0 1 * * 6 root [ -x /opt/labl/sbin/labl ] && /opt/labl/sbin/labl stop &>> /var/log/labl.restart.log # auto will restart
