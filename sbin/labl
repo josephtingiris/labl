@@ -111,15 +111,6 @@ function debug() {
     fi
 }
 
-# regex to validate hostname
-function hostnameValid() {
-    debug "$FUNCNAME Function = $FUNCNAME" 50
-
-    local hostname=${1}
-    [[ $hostname =~ ^(([a-zA-Z]|[a-zA-Z][a-zA-Z0-9-]*[a-zA-Z0-9]).)*([A-Za-z]|[A-Za-z][A-Za-z0-9-]*[A-Za-z0-9])$ ]] || return 1
-    return 0
-}
-
 # validate 'IP_Address' & set global IP_Address_Family if it passes
 function ipValid() {
     debug "$FUNCNAME Function = $FUNCNAME" 50
@@ -133,14 +124,6 @@ function ipValid() {
         _echo "empty ip_address passed to $FUNCNAME" WARNING
         return 1
     else
-
-        # hostnames are NOT supported
-        if hostnameValid "$ip_address"; then
-            debug "$FUNCNAME Valid Hostname" 34
-            IP_Address_Family="hostname"
-        else
-            debug "$FUNCNAME Invalid Hostname" 33
-        fi
 
         if [ "$IP_Address_Family" == "" ]; then
             if ipv4Valid "$ip_address"; then
@@ -178,7 +161,7 @@ function ipValid() {
             fi
         fi
 
-        if [ "$IP_Address_Family" == "hostname" ] || [ "$IP_Address_Family" == "" ]; then
+        if [ "$IP_Address_Family" == "" ]; then
             debug "$FUNCNAME invalid IP_Address_Family $IP_Address_Family" 33
             if [ "$IP_Address_Family" == "" ]; then
                 if [ $Status_Flag -eq 1 ]; then
@@ -971,11 +954,7 @@ function lablInit() {
         debug "IP_Address = $IP_Address" 1
 
         if ! ipValid "$IP_Address"; then
-            if [ "$IP_Address_Family" == "hostname" ]; then
-                usage "hostnames are NOT supported"
-            else
-                usage "invalid IP address or CIDR range '$IP_Address'"
-            fi
+            usage "invalid IP address or CIDR range '$IP_Address'"
         fi
 
     fi
