@@ -314,11 +314,6 @@ function lablAdd() {
     # ip_families is local here because the given ip may be either a v4 inet addres *or* a v6 inet6 address (or maybe both)
     if ipv4Valid "$ip"; then
         local ip_families=("inet")
-
-        if [[ "$ip" != *"/"* ]]; then
-            ip+="/32" # debt
-        fi
-
     else
         if ipv4ValidCidr "$ip"; then
             local ip_families=("inet")
@@ -539,11 +534,7 @@ function lablAuto() {
         sort -ruV ${ipset_families_save}.new -o ${ipset_families_save}.new
         local blacklist_add
         for blacklist_add in $(diff ${ipset_families_save} ${ipset_families_save}.new 2> /dev/null | grep ^\> | awk '{print $NF}'); do
-            if [[ "$blacklist_add" != *"/"* ]]; then # debt
-                lablAdd ${blacklist_add}/32 blacklist # debt
-            else
-                lablAdd $blacklist_add blacklist
-            fi
+            lablAdd $blacklist_add blacklist
         done
         unset blacklist_add
     done
@@ -693,22 +684,16 @@ function lablCheckWhitelists() {
     local ip_range=$(subnetcalc $ip -n -nocolor 2> /dev/null | grep ^Host\ Range)
     debug "$FUNCNAME ip_range = $ip_range" 10
 
-    local whitelist_cidr="32"
     let local whitelist_match=1
 
     local whitelist
     for whitelist in ${Whitelists[@]}; do
         debug "$FUNCNAME whitelist = $whitelist" 10
 
-        local whitelist_cidr=${whitelist##*/} # ${0##*/}
-        if [ "$whitelist_cidr" == "$whitelist" ]; then
-            debug "$FUNCNAME [WARNING] whitelist_cidr == whitelist $whitelist" 10
+        # don't check empty whitelist
+        if [ "$whitelist" == "" ]; then
             continue
         fi
-
-        debug "$FUNCNAME " 20
-        debug "$FUNCNAME ip = $ip, whitelist = $whitelist, whitelist_cidr = $whitelist_cidr" 14
-        debug "$FUNCNAME " 20
 
         # perfect match
         if [ "$ip" == "$whitelist" ]; then
@@ -717,17 +702,41 @@ function lablCheckWhitelists() {
             break
         fi
 
-        # if it's not a perfect match, checking other /32's is pointless
-        if [ "$whitelist_cidr" == "32" ]; then
-            debug "$FUNCNAME ip = $ip, whitelist = $whitelist [SKIP, IMPOSSIBLE]" 22
+        if [[ "$whitelist" == *"/"* ]]; then
+            local whitelist_cidr=${whitelist##*/} # ${0##*/}
+        else
+            local whitelist_cidr=""
+        fi
+
+        # make sure whitelist_cidr is an integer
+        if [[ ! $whitelist_cidr =~ ^[0-9]+$ ]]; then
+            local whitelist_cidr=""
+        fi
+
+        if [ "$whitelist_cidr" == "$whitelist" ]; then
+            _error "whitelist_cidr == whitelist $whitelist" 3 ERROR # should be dead code, now; leaving to be sure
             continue
         fi
 
+        # if it's not a perfect match, and the whitelist has no host range, then checking other point to point links is pointless
+        if [ "$whitelist_cidr" == "" ]; then
+            debug "$FUNCNAME ip = $ip, whitelist = $whitelist [SKIP, IMPOSSIBLE]" 4
+            continue
+        fi
+
+        # the following (depends on subnetcalc) to check host ranges; TODO: write (or find) a better alternative
+
+        debug "$FUNCNAME " 20
+        debug "$FUNCNAME ip = $ip, whitelist = $whitelist, whitelist_cidr = $whitelist_cidr" 2
+        debug "$FUNCNAME " 20
+
         debug "$FUNCNAME ip = $ip, whitelist = $whitelist [OK, CHECK]" 22
 
-        # strip the mask off the ip, replace it with the whitelist mask, & compare ranges
+        # strip the cidr off the ip, replace it with the whitelist mask, & compare ranges
         ip_whitelist=${ip%%/*}
-        ip_whitelist+="/$whitelist_cidr"
+        if [ "$whitelist_cidr" != "" ]; then
+            ip_whitelist+="/$whitelist_cidr"
+        fi
         local whitelist_range=$(subnetcalc $whitelist -n -nocolor 2> /dev/null | grep ^Host\ Range)
         local ip_whitelist_range=$(subnetcalc $ip_whitelist -n -nocolor 2> /dev/null | grep ^Host\ Range)
         if [ "$whitelist_range" == "" ]; then
@@ -738,20 +747,25 @@ function lablCheckWhitelists() {
                 debug "$FUNCNAME ip = $ip, whitelist = $whitelist [MATCH, RANGE]" 22
                 debug "$FUNCNAME ip = $ip, whitelist = $whitelist ip_whitelist = $ip_whitelist" 14
                 debug "$FUNCNAME ip_whitelist_range = $ip_whitelist_range ($ip_whitelist)" 14
-                break
             fi
         fi
 
         debug "$FUNCNAME ip_range           = $ip_range ($ip)" 14
         debug "$FUNCNAME whitelist_range    = $whitelist_range ($whitelist)" 14
+
+        if [ $whitelist_match -eq 0 ]; then
+            debug "$FUNCNAME ip = $ip AND whitelist = $whitelist [MATCH]" 5
+            _echo "$ip is whitelisted" NOTICE
+            return 0
+        fi
+
     done
     unset whitelist
 
-    if [ $whitelist_match -eq 0 ]; then
-        debug "$FUNCNAME ip = $ip AND whitelist = $whitelist [MATCH]" 5
-        _echo "$ip is whitelisted" NOTICE
-        return 0
-    fi
+    # debt; new
+    # to be ultra safe, ensuring a larger range isn't allowed if a lower range is whitelisted (that's not a point to point)
+    # this is especially IMPORTANT when using older versions of ipset that do *not* support nomatch, e.g. ipset v6.11 (RHEL 6)
+    # i.e. 10.11.12.224/27 is whitelisted & 10.11.12.0/24 is blacklisted; 10.11.12.0/24 is allowed with only the above logic
 
     return 1
 
@@ -849,6 +863,12 @@ function lablInit() {
         source "${Dirname_0}/../include/debug-bash/Debug.bash"
     fi
 
+    if [ -r "${Dirname_0}/../include/ip-bash/IP.bash" ]; then
+        source "${Dirname_0}/../include/ip-bash/IP.bash"
+    else
+        aborting "IP.bash failed to source"
+    fi
+
     debug "$FUNCNAME 0 = $0" 5
     debug "$FUNCNAME Debug = $Debug" 1
     debug "$FUNCNAME Basename_0 = $Basename_0" 1
@@ -892,6 +912,8 @@ function lablInit() {
     if [ "$Basename_0" == "whitelist" ]; then
         Ipset_Mode="whitelist"
     fi
+
+    Status_Flag=0
 
     # evaluate usage flag as sym link or option (arg 1)
     Flag=$(printf "$Basename_0" | awk -F- '{print $2}')
@@ -1055,7 +1077,7 @@ function lablLoad() {
                     local load_line
                     while read load_line; do
                         load_candidates+=($load_line)
-                    done <<< "$(bash "$load_file" | egrep -e '^[0-9]|^[a-f]|^[A-F]' | awk '{print $1}')" # must be one ip per line
+                    done <<< "$(bash "$load_file" "$Option" | egrep -e '^[0-9]|^[a-f]|^[A-F]' | awk '{print $1}')" # must be one ip per line
                     unset load_line
                 else
                     debug "$FUNCNAME load_file = $load_file (cat)" 10
@@ -1090,15 +1112,8 @@ function lablLoad() {
             debug "$FUNCNAME load_candidate = $load_candidate" 30
 
             let local valid_load_candidate=1
-            if ipv4Valid "$load_candidate"; then
+            if ipValid "$load_candidate"; then
                 let local valid_load_candidate=0
-                if [[ "$load_candidate" != *"/"* ]]; then
-                    load_candidate+="/32" # debt
-                fi
-            else
-                if ipValid "$load_candidate"; then
-                    let local valid_load_candidate=0
-                fi
             fi
 
             if [ $valid_load_candidate -eq 0 ]; then
@@ -1267,11 +1282,6 @@ function lablRemove() {
     # ip_families is local here because the given ip may be either a v4 inet addres *or* a v6 inet6 address (or maybe both)
     if ipv4Valid "$ip"; then
         local ip_families=("inet")
-
-        if [[ "$ip" != *"/"* ]]; then
-            ip+="/32" # debt
-        fi
-
     else
         if ipv4ValidCidr "$ip"; then
             local ip_families=("inet")
