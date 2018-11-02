@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# block auth failures to zimbra smtps (mta)
+# labl blacklist for blocking auth failures to zimbra imap ports 443 and 993
 
 # 20181008, jtingiris
 

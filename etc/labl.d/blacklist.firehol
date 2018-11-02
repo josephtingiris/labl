@@ -1,6 +1,8 @@
 #!/bin/bash
 
-# blacklist firehol spamhaus lists once per day
+# labl blacklist to apply firehol spamhaus lists once per day
+
+exit 0
 
 blacklist_curl=1 # false
 
