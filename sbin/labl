@@ -21,6 +21,7 @@ Options=()
 Options+=(add)
 Options+=(auto)
 Options+=(check)
+Options+=(iptables)
 Options+=(remove)
 Options+=(restart)
 #Options+=(restore) # TODO; support this
@@ -465,8 +466,8 @@ function lablAuto() {
         lablStop
         lablStart
     else
-        lablLoadBlacklists blacklist
         lablLoadWhitelists whitelist
+        lablLoadBlacklists blacklist
     fi
 
     local ipset_save=/var/tmp/labl.auto.save
@@ -541,16 +542,16 @@ function lablCheck() {
         return 1
     fi
 
-    if [ "$2" == "blacklist" ]; then
-        local blacklist=0
-    else
-        local blacklist=1
-    fi
-
     if [ "$2" == "whitelist" ]; then
         local whitelist=0
     else
         local whitelist=1
+    fi
+
+    if [ "$2" == "blacklist" ]; then
+        local blacklist=0
+    else
+        local blacklist=1
     fi
 
     if [ "$2" == "" ]; then
@@ -597,8 +598,8 @@ function lablCheck() {
     local ip_family
     for ip_family in ${ip_families[@]}; do
 
-        let blacklisted=1
         let whitelisted=1
+        let blacklisted=1
         #let quiet=1
 
         if [ $whitelist -eq 0 ]; then
@@ -1455,6 +1456,11 @@ function lablStart() {
         printf "\n"
     fi
 
+    if [ $Iptables_Flag -eq 0 ] && [ "$1" == "iptables" ]; then
+        _echo "$Basename_0 start successful" "OK"
+        return
+    fi
+
     lablLoadBlacklists blacklist
     lablLoadWhitelists whitelist
 
@@ -1464,7 +1470,16 @@ function lablStart() {
 
     if usageOptionSingle $Option; then
 
-        # blacklisting first, rather than whitelisting, allows whitelists to override blacklists
+        local whitelist
+        for whitelist in ${Whitelists[@]}; do
+            debug "$FUNCNAME whitelist = $whitelist" 10
+            lablAdd $whitelist whitelist
+        done
+        unset whitelist
+
+        if [ $Verbose_Flag -eq 0 ]; then
+            printf "\n"
+        fi
 
         local blacklist
         for blacklist in ${Blacklists[@]}; do
@@ -1476,6 +1491,8 @@ function lablStart() {
         if [ $Verbose_Flag -eq 0 ]; then
             printf "\n"
         fi
+
+        # whitelisting a second time allows whitelists to override blacklists
 
         local whitelist
         for whitelist in ${Whitelists[@]}; do
@@ -1553,7 +1570,7 @@ function lablStatus() {
                 let ip_family_count=$ip_family_count+1
             fi
 
-            ipset list ${Ipset_Name}_${ip_family} 2> /dev/null > /var/tmp/${Ipset_Name}_${ip_family}.status.${Timestamp}
+            ipset -t list ${Ipset_Name}_${ip_family} 2> /dev/null > /var/tmp/${Ipset_Name}_${ip_family}.status.${Timestamp}
             if [ -r /var/tmp/${Ipset_Name}_${ip_family}.status.${Timestamp} ]; then
                 cat /var/tmp/${Ipset_Name}_${ip_family}.status.${Timestamp}
             fi
@@ -1583,6 +1600,10 @@ function lablStatus() {
                 else
                     echo "[WARNING] $table_exec --match-set ${Ipset_Name}_${ip_family} is loaded $table_count times"
                     echo
+                fi
+
+                if [ $Iptables_Flag -eq 0 ] && [ "$1" == "iptables" ]; then
+                    continue
                 fi
 
                 lablLoadBlacklists blacklist
@@ -1733,74 +1754,76 @@ function lablStatus() {
     done
     unset ip_family
 
-    if [ $labl_running -eq 0 ]; then
-        if [ $labl_inet_count -eq 0 ] && [ $labl_inet6_count -eq 0 ]; then
-            echo "labl is running, nothing is being blacklisteded or whitelisted"
-            echo
-        else
-            echo "$labl_inet6_blacklist_count blacklisted and $labl_inet6_whitelist_count whitelisted v6 IP addresses"
-            echo "$labl_inet_blacklist_count blacklisted and $labl_inet_whitelist_count whitelisted v4 IP addresses"
-            echo
-            echo "labl is running, $labl_inet_count v4 and $labl_inet6_count v6 addresses loaded"
-            echo
-
-            # TODO debt; this part works but needs work.
-            if [ $Permanent_Flag -eq 0 ]; then
-
-                echo "[+]"
-                echo "[+] Permanent (check); $Blacklist_Permanent_File"
-                echo "[+]"
+    if [ $Iptables_Flag -ne 0 ]; then
+        if [ $labl_running -eq 0 ]; then
+            if [ $labl_inet_count -eq 0 ] && [ $labl_inet6_count -eq 0 ]; then
+                echo "labl is running, nothing is being blacklisteded or whitelisted"
+                echo
+            else
+                echo "$labl_inet6_blacklist_count blacklisted and $labl_inet6_whitelist_count whitelisted v6 IP addresses"
+                echo "$labl_inet_blacklist_count blacklisted and $labl_inet_whitelist_count whitelisted v4 IP addresses"
+                echo
+                echo "labl is running, $labl_inet_count v4 and $labl_inet6_count v6 addresses loaded"
                 echo
 
-                if [ ! -d $(dirname "$Blacklist_Permanent_File") ]; then
-                    mkdir -p "$(dirname "$Blacklist_Permanent_File")" &> /dev/null
-                    if [ $? -ne 0 ]; then
-                        aborting "[ERROR] mkdir -p $(dirname "$Blacklist_Permanent_File") failed"
+                # TODO debt; this part works but needs work.
+                if [ $Permanent_Flag -eq 0 ]; then
+
+                    echo "[+]"
+                    echo "[+] Permanent (check); $Blacklist_Permanent_File"
+                    echo "[+]"
+                    echo
+
+                    if [ ! -d $(dirname "$Blacklist_Permanent_File") ]; then
+                        mkdir -p "$(dirname "$Blacklist_Permanent_File")" &> /dev/null
+                        if [ $? -ne 0 ]; then
+                            aborting "[ERROR] mkdir -p $(dirname "$Blacklist_Permanent_File") failed"
+                        fi
                     fi
-                fi
 
-                echo
+                    echo
 
-                local permanent_qualifiers=0
+                    local permanent_qualifiers=0
 
-                local ip_family
-                for ip_family in ${IP_Families[@]}; do
-                    while read blacklist_ip; do
-                        if ipv4Valid $blacklist_ip; then
-                            local blacklist_qualifier=$(echo "$blacklist_ip" | awk -F\. '{print $1"."$2"."$3}')
-                            local blacklist_qualifier_count=$(ipset save ${Ipset_Name}_${ip_family} | grep -v nomatch$ | awk '{print $NF}' | grep ^${blacklist_qualifier}\. | wc -l)
-                            if [ $blacklist_qualifier_count -gt $Blacklist_Permanent_Max ]; then
-                                if ! grep ^${blacklist_qualifier}.0/24 "$Blacklist_Permanent_File" &> /dev/null; then
-                                    _echo "# blacklisted ip = $blacklist_ip, qualifier $blacklist_qualifier currently has $blacklist_qualifier_count blacklisted which is >= $Blacklist_Permanent_Max" WARNING
-                                    echo "${blacklist_qualifier}.0/24" >> "${Blacklist_Permanent_File}"
-                                    if [ $? -eq 0 ]; then
-                                        _echo "# ${blacklist_qualifier}.0/24 added to $Blacklist_Permanent_File" NOTICE
-                                    else
-                                        _error "# ${blacklist_qualifier}.0/24 failed to add to $Blacklist_Permanent_File" ERROR
+                    local ip_family
+                    for ip_family in ${IP_Families[@]}; do
+                        while read blacklist_ip; do
+                            if ipv4Valid $blacklist_ip; then
+                                local blacklist_qualifier=$(echo "$blacklist_ip" | awk -F\. '{print $1"."$2"."$3}')
+                                local blacklist_qualifier_count=$(ipset save ${Ipset_Name}_${ip_family} | grep -v nomatch$ | awk '{print $NF}' | grep ^${blacklist_qualifier}\. | wc -l)
+                                if [ $blacklist_qualifier_count -gt $Blacklist_Permanent_Max ]; then
+                                    if ! grep ^${blacklist_qualifier}.0/24 "$Blacklist_Permanent_File" &> /dev/null; then
+                                        _echo "# blacklisted ip = $blacklist_ip, qualifier $blacklist_qualifier currently has $blacklist_qualifier_count blacklisted which is >= $Blacklist_Permanent_Max" WARNING
+                                        echo "${blacklist_qualifier}.0/24" >> "${Blacklist_Permanent_File}"
+                                        if [ $? -eq 0 ]; then
+                                            _echo "# ${blacklist_qualifier}.0/24 added to $Blacklist_Permanent_File" NOTICE
+                                        else
+                                            _error "# ${blacklist_qualifier}.0/24 failed to add to $Blacklist_Permanent_File" ERROR
+                                        fi
+                                        let permanent_qualifiers=$permanent_qualifiers+1
                                     fi
-                                    let permanent_qualifiers=$permanent_qualifiers+1
                                 fi
                             fi
-                        fi
-                    done <<<  "$(ipset save ${Ipset_Name}_${ip_family} | grep -v nomatch$ | grep ^add | awk '{print $NF}' | grep -v \/ | sort -uV)"
-                done
-                unset ip_family
+                        done <<<  "$(ipset save ${Ipset_Name}_${ip_family} | grep -v nomatch$ | grep ^add | awk '{print $NF}' | grep -v \/ | sort -uV)"
+                    done
+                    unset ip_family
 
-                if [ ${permanent_qualifiers} -le 0 ]; then
-                    _echo "permanent check completed; no qualifiers found" OK
-                else
-                    if [ -w "${Blacklist_Permanent_File}" ]; then
-                        sort -uV "${Blacklist_Permanent_File}" -o "${Blacklist_Permanent_File}"
+                    if [ ${permanent_qualifiers} -le 0 ]; then
+                        _echo "permanent check completed; no qualifiers found" OK
+                    else
+                        if [ -w "${Blacklist_Permanent_File}" ]; then
+                            sort -uV "${Blacklist_Permanent_File}" -o "${Blacklist_Permanent_File}"
+                        fi
                     fi
+
                 fi
 
             fi
-
+        else
+            echo
+            echo "labl is NOT running, nothing is being ${Ipset_Mode}ed"
+            echo
         fi
-    else
-        echo
-        echo "labl is NOT running, nothing is being ${Ipset_Mode}ed"
-        echo
     fi
 
     # clean up
@@ -1983,7 +2006,7 @@ function usageOptionSingle() {
 
     local option="$1"
 
-    if [ "$option" == "auto" ] || [ "$option" == "restart" ] || [ "$option" == "save" ] || [ "$option" == "start" ] || [ "$option" == "status" ] || [ "$option" == "stop" ]; then
+    if [ "$option" == "auto" ] || [ "$option" == "restart" ] || [ "$option" == "save" ] || [ "$option" == "start" ] || [ "$option" == "iptables" ] || [ "$option" == "status" ] || [ "$option" == "stop" ]; then
         return 0
     fi
 
@@ -1995,6 +2018,17 @@ function usageOptionSingle() {
 lablInit $@
 
 # supported options without other arguments are restart, start, status, stop
+
+# iptables is a special option, exit
+Iptables_Flag=1 # 0=true, 1=false
+if [ "$Option" == "iptables" ]; then
+    Start_Flag=0 # 0=true, 1=false
+    Status_Flag=0 # 0=true, 1=false
+    Iptables_Flag=0 # 0=true, 1=false
+    lablStart iptables
+    lablStatus iptables
+    exit
+fi
 
 # status is a special option, exit
 Permanent_Flag=1 # 0=true, 1=false
