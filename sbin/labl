@@ -1605,7 +1605,7 @@ function lablStatus() {
                     echo
                 fi
 
-                if [ "$1" != "permanent" ] || [ "$1" != "verbose" ]; then
+                if [ "$1" != "permanent" ] && [ "$1" != "verbose" ]; then
                     continue
                 fi
 
