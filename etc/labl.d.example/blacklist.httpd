@@ -1,0 +1,16 @@
+#!/bin/bash
+
+Log_Dir=/var/log/httpd
+
+if [ -r "$Log_Dir" ]; then
+
+    PATH=/bin:/sbin:/usr/bin:/usr/sbin
+    (
+    cat "${Log_Dir}/"*.access.*.log 2> /dev/null \
+        | egrep -ie "wp-login.php|redirect.php|otsmobile|phpmyadmin7|login.cgi\?cli|login\/indexAction|pma\/scripts|user\/soapCaller.bs|wls-wsat|config/spa301G.cfg|plcmSpip|tftp\/spa122.cfg|webthings\/core|caiTianXia|pmd\/index|\/shell\?|cgi-bin\/nobody|OPT127MAX|groupoffice" \
+        | awk '{print $1}' \
+        | egrep -e '^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])($|\/([0-9]|[1-2][0-9]|3[0-2])$)' \
+        | sort -uV
+
+    ) 2> /dev/null
+fi

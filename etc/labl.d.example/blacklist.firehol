@@ -1,23 +1,16 @@
 #!/bin/bash
 
-# labl blacklist to apply firehol spamhaus lists once per day
+# blacklist firehol spamhaus lists once per day
 
-exit 0
+TMP_FILE=/var/tmp/blacklist.firehol.tmp
 
-blacklist_curl=1 # false
-
-if [ "$1" == "auto" ]; then
-    if [[ $((10#$(date +%H))) -eq 23 ]] && [[ $((10#$(date +%M))) -gt 50 ]]; then
-        blacklist_curl=0 # true
-    fi
-fi
-
-if [ "$1" == "restart" ] || [ "$1" == "start" ] || [ "$1" == "status" ]; then
-    blacklist_curl=0 # true
-fi
-
-if [ $blacklist_curl -eq 0 ]; then
+if [ ! -f "${TMP_FILE}" ] || [ "$(date +%Y%m%d -r "${TMP_FILE}")" != "$(date +%Y%m%d)" ]; then
+    (
     curl https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/spamhaus_drop.netset 2> /dev/null
     curl https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/spamhaus_edrop.netset 2> /dev/null
     curl https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/dshield_7d.netset 2> /dev/null
+    if [ $? -eq 0 ]; then
+        touch "${TMP_FILE}"
+    fi
+    ) | sort -uV
 fi

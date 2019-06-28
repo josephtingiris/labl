@@ -1,0 +1,11 @@
+#!/bin/bash
+
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+
+(
+# UDP: bad checksum. To port any port, any ulen.
+/usr/bin/dmesg | sed -nEe 's#^.* UDP: bad checksum. From (.*):(.*) to(.*):(.*) ulen (.*)#\1#p'
+
+# UDP: bad checksum. To port 161 ulen 46
+#/usr/bin/dmesg | sed -nEe 's#^.* UDP: bad checksum. From (.*):(.*) to(.*):161 ulen 46#\1#p'
+) | sort -uV

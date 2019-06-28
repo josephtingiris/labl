@@ -21,6 +21,7 @@ Options=()
 Options+=(add)
 Options+=(auto)
 Options+=(check)
+Options+=(iptables)
 Options+=(remove)
 Options+=(restart)
 #Options+=(restore) # TODO; support this
@@ -50,19 +51,22 @@ fi
 
 # print formatted output to stdout
 function _echo() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
+
     if [ "$2" == "" ]; then
         local echo_status="OK"
     else
         local echo_status="$2"
     fi
 
-    local -i pad=11
-    local -i pad_left=(${pad}-${#echo_status})/2
+    local pad=11
+    let local pad_left=(${pad}-${#echo_status})/2
     if [ ${pad_left} -lt 0 ]; then pad_left=1; fi
-    local -i pad_right=(${pad}-${#echo_status})-${pad_left}
+    let local pad_right=(${pad}-${#echo_status})-${pad_left}
     if [ ${pad_right} -lt 0 ]; then pad_right=1; fi
 
-    (>&2 printf "%(%Y-%m-%d %H:%M:%S %Z)T : [%${pad_left}.s%s%${pad_right}.s] : %s\n" "-1" $pad_left "$echo_status" $pad_right "$1")
+    (>&2 printf "$(date) : [%${pad_left}.s%s%${pad_right}.s] : %s\n" $pad_left "$echo_status" $pad_right "$1")
+
 }
 
 # print formatted output to stderr
@@ -90,15 +94,16 @@ function aborting() {
     exit $RC
 }
 
-# output debug message to stderr if global debug is greater than or equal to local debug_level
+# print debug output to stderr if global debug is greater than or equal to local debug_level
 function debug() {
     if [ $Debug -eq 0 ]; then
         return
     fi
 
     local debug_message=$1
-    local debug_level=$2
-    if [[ ! $debug_level =~ ^[0-9]+$ ]]; then
+    local debug_level=$(echo "$2" |  sed "s/[^0-9]//g")
+
+    if [ "$debug_level" == "" ]; then
         local -i debug_level=0 # default debug level is 0
     fi
 
@@ -107,64 +112,87 @@ function debug() {
     fi
 }
 
-# output the ip 'family' of an ip address and return true, or output nothing and return false
-function ipFamily() {
-    local ip=$1
-
-    local ip_family
-    if ipv4Valid $ip; then
-        ip_family="inet"
-    else
-        if ipv6Valid $ip; then
-            ip_family="inet6"
-        fi
-    fi
-
-    debug "ip_family = ${ip_family}" 7
-
-    if [ ${#ip_family} -eq 0 ]; then
-        return 1
-    else
-        printf "%s" "$ip_family"
-        return 0
-    fi
-}
-
-# validate an ip address
+# validate 'IP_Address' & set global IP_Address_Family if it passes
 function ipValid() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     local ip_address="$1"
 
     debug "$FUNCNAME ip_address = $ip_address" 34
 
-    if ipv4Valid $ip_address; then
-        return 0
+    # the rest of the options require an ip|ip/cidr, so that must be validated ...
+    if [ "$ip_address" == "" ]; then
+        _echo "empty ip_address passed to $FUNCNAME" WARNING
+        return 1
     else
-        if ipv6Valid $ip_address; then
-            return 0
+
+        if [ "$IP_Address_Family" == "" ]; then
+            if ipv4Valid "$ip_address"; then
+                debug "$FUNCNAME Valid IPv4 IP Address" 34
+                IP_Address_Family="inet"
+            else
+                debug "$FUNCNAME Invalid IPv4 IP Address" 33
+            fi
+        fi
+
+        if [ "$IP_Address_Family" == "" ]; then
+            if ipv4ValidCidr "$ip_address"; then
+                debug "$FUNCNAME Valid IPv4 CIDR Range" 34
+                IP_Address_Family="inet"
+            else
+                debug "$FUNCNAME Invalid IPv4 CIDR Range" 33
+            fi
+        fi
+
+        if [ "$IP_Address_Family" == "" ]; then
+            if ipv6Valid "$ip_address"; then
+                debug "$FUNCNAME Valid IPv6 IP Address" 34
+                IP_Address_Family="inet6"
+            else
+                debug "$FUNCNAME Invalid IPv6 IP Address" 33
+            fi
+        fi
+
+        if [ "$IP_Address_Family" == "" ]; then
+            if ipv6ValidCidr "$ip_address"; then
+                debug "$FUNCNAME Valid IPv6 CIDR Range" 34
+                IP_Address_Family="inet6"
+            else
+                debug "$FUNCNAME Invalid IPv6 CIDR Range" 33
+            fi
+        fi
+
+        if [ "$IP_Address_Family" == "" ]; then
+            debug "$FUNCNAME invalid IP_Address_Family $IP_Address_Family" 33
+            if [ "$IP_Address_Family" == "" ]; then
+                if [ $Status_Flag -eq 1 ]; then
+                    _echo "empty IP_Address_Family in $FUNCNAME" WARNING
+                fi
+            fi
+            return 1
+        else
+            debug "$FUNCNAME IP_Address_Family = $IP_Address_Family" 33
         fi
     fi
 
-    return 1
+    debug "$FUNCNAME ip_address = $ip_address" 33
+
+    return 0
+
 }
 
 # regex for IPv4 validation
 function ipv4Valid() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
-    if [ $IP4_Enabled -eq 1 ]; then
+    if [ $IP4 -eq 1 ]; then
         return 1
     fi
 
     local inet=${1}
 
-    if [[ ! "${inet}" == *"/"* ]]; then
-        # address without cidr bits
-        if [[ ${inet} =~ ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$ ]]; then
-            return 0
-        fi
-    else
-        # address with cidr bits
-        if [[ ${inet} =~ ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$ ]]; then
+    if [[ $inet =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        if [[ $inet =~ ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$ ]]; then
             return 0
         fi
     fi
@@ -173,25 +201,52 @@ function ipv4Valid() {
 
 }
 
+# regex for IPv4 CIDR validation
+function ipv4ValidCidr() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
+
+    if [ $IP4 -eq 1 ]; then
+        return 1
+    fi
+
+    local inet_range=${1}
+
+    if [[ $inet_range =~ ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$ ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
 # regex for IPv6 validation
 function ipv6Valid() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
-    if [ $IP6_Enabled -eq 1 ]; then
+    if [ $IP6 -eq 1 ]; then
         return 1
     fi
 
     local inet6=${1}
 
-    if [[ ! "${inet6}" == *"/"* ]]; then
-        # address without cidr bits
-        if [[ ${inet6} =~ ^s*((([0-9A-Fa-f]{1,4}:){7}([0-9A-Fa-f]{1,4}|:))|(([0-9A-Fa-f]{1,4}:){6}(:[0-9A-Fa-f]{1,4}|((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3})|:))|(([0-9A-Fa-f]{1,4}:){5}(((:[0-9A-Fa-f]{1,4}){1,2})|:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3})|:))|(([0-9A-Fa-f]{1,4}:){4}(((:[0-9A-Fa-f]{1,4}){1,3})|((:[0-9A-Fa-f]{1,4})?:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){3}(((:[0-9A-Fa-f]{1,4}){1,4})|((:[0-9A-Fa-f]{1,4}){0,2}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){2}(((:[0-9A-Fa-f]{1,4}){1,5})|((:[0-9A-Fa-f]{1,4}){0,3}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){1}(((:[0-9A-Fa-f]{1,4}){1,6})|((:[0-9A-Fa-f]{1,4}){0,4}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(:(((:[0-9A-Fa-f]{1,4}){1,7})|((:[0-9A-Fa-f]{1,4}){0,5}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:)))(%.+)?s* ]]; then
-            return 0
-        fi
-    else
-        # address with cidr bits
-        if [[ ${inet6} =~ ^s*((([0-9A-Fa-f]{1,4}:){7}([0-9A-Fa-f]{1,4}|:))|(([0-9A-Fa-f]{1,4}:){6}(:[0-9A-Fa-f]{1,4}|((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3})|:))|(([0-9A-Fa-f]{1,4}:){5}(((:[0-9A-Fa-f]{1,4}){1,2})|:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3})|:))|(([0-9A-Fa-f]{1,4}:){4}(((:[0-9A-Fa-f]{1,4}){1,3})|((:[0-9A-Fa-f]{1,4})?:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){3}(((:[0-9A-Fa-f]{1,4}){1,4})|((:[0-9A-Fa-f]{1,4}){0,2}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){2}(((:[0-9A-Fa-f]{1,4}){1,5})|((:[0-9A-Fa-f]{1,4}){0,3}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){1}(((:[0-9A-Fa-f]{1,4}){1,6})|((:[0-9A-Fa-f]{1,4}){0,4}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(:(((:[0-9A-Fa-f]{1,4}){1,7})|((:[0-9A-Fa-f]{1,4}){0,5}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:)))(%.+)?s*(\/(d|dd|1[0-1]d|12[0-8]))$ ]]; then
-            return 0
-        fi
+    if [[ $inet6 =~ ^s*((([0-9A-Fa-f]{1,4}:){7}([0-9A-Fa-f]{1,4}|:))|(([0-9A-Fa-f]{1,4}:){6}(:[0-9A-Fa-f]{1,4}|((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3})|:))|(([0-9A-Fa-f]{1,4}:){5}(((:[0-9A-Fa-f]{1,4}){1,2})|:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3})|:))|(([0-9A-Fa-f]{1,4}:){4}(((:[0-9A-Fa-f]{1,4}){1,3})|((:[0-9A-Fa-f]{1,4})?:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){3}(((:[0-9A-Fa-f]{1,4}){1,4})|((:[0-9A-Fa-f]{1,4}){0,2}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){2}(((:[0-9A-Fa-f]{1,4}){1,5})|((:[0-9A-Fa-f]{1,4}){0,3}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){1}(((:[0-9A-Fa-f]{1,4}){1,6})|((:[0-9A-Fa-f]{1,4}){0,4}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(:(((:[0-9A-Fa-f]{1,4}){1,7})|((:[0-9A-Fa-f]{1,4}){0,5}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:)))(%.+)?s* ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
+# regex for IPv6 CIDR validation
+function ipv6ValidCidr() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
+
+    if [ $IP6 -eq 1 ]; then
+        return 1
+    fi
+
+    local inet6_range=${1}
+
+    if [[ $inet6_range =~ ^s*((([0-9A-Fa-f]{1,4}:){7}([0-9A-Fa-f]{1,4}|:))|(([0-9A-Fa-f]{1,4}:){6}(:[0-9A-Fa-f]{1,4}|((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3})|:))|(([0-9A-Fa-f]{1,4}:){5}(((:[0-9A-Fa-f]{1,4}){1,2})|:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3})|:))|(([0-9A-Fa-f]{1,4}:){4}(((:[0-9A-Fa-f]{1,4}){1,3})|((:[0-9A-Fa-f]{1,4})?:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){3}(((:[0-9A-Fa-f]{1,4}){1,4})|((:[0-9A-Fa-f]{1,4}){0,2}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){2}(((:[0-9A-Fa-f]{1,4}){1,5})|((:[0-9A-Fa-f]{1,4}){0,3}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){1}(((:[0-9A-Fa-f]{1,4}){1,6})|((:[0-9A-Fa-f]{1,4}){0,4}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(:(((:[0-9A-Fa-f]{1,4}){1,7})|((:[0-9A-Fa-f]{1,4}){0,5}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:)))(%.+)?s*(\/(d|dd|1[0-1]d|12[0-8]))$ ]]; then
+        return 0
     fi
 
     return 1
@@ -199,6 +254,7 @@ function ipv6Valid() {
 
 # add an ip address or range to the appropriate ipset
 function lablAdd() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     local ip="$1"
     if [ "$ip" == "" ]; then
@@ -207,7 +263,7 @@ function lablAdd() {
     fi
 
     if ! ipValid "$ip"; then
-        debug "$FUNCNAME ip '$ip' is invalid" 1
+        debug "$FUNCNAME ip $ip is invalid" 1
         return 1
     fi
 
@@ -234,218 +290,251 @@ function lablAdd() {
     fi
 
     if [ "$2" == "all" ]; then
-        _echo "$FUNCNAME ip '$ip' is being whitelisted THEN blacklisted (this hasn't been fully tested!)" WARNING
+        _echo "$FUNCNAME ip $ip is being whitelisted THEN blacklisted (this hasn't been fully tested!)" WARNING
         local whitelist=0
         local blacklist=0
     fi
 
-    local ip_family
-    if ! ip_family=$(ipFamily $ip); then
-        _echo "$FUNCNAME ip '$ip' ip_family is unsupported" WARNING
-        return 1
-    fi
-
-    local blacklisted=1
-    local whitelisted=1
-
-    # whitelist first
-    if [ $whitelist -eq 0 ]; then
-
-        debug "$FUNCNAME ip = $ip ($ip_family) $whitelist whitelist" 14
-
-        # remove it from blacklist
-        if lablCheck "$ip" blacklist quiet; then
-
-            debug "$FUNCNAME $ip exists in blacklist" 14
-
-            if lablRemove "$ip" blacklist quiet; then
-                local blacklisted=1
-                _echo "$ip removed from ${Ipset_Name}_${ip_family} blacklist" OK
-            else
-                local blacklisted=0
-                _echo "$ip was NOT removed from ${Ipset_Name}_${ip_family} blacklist" NOTICE
-            fi
-
-            if lablCheck "$ip" blacklist quiet; then
-                local blacklisted=0
-                _echo "$ip was NOT removed from ${Ipset_Name}_${ip_family} blacklist" WARNING
-            fi
+    # ip_families is local here because the given ip may be either a v4 inet addres *or* a v6 inet6 address (or maybe both)
+    if ipv4Valid "$ip"; then
+        local ip_families=("inet")
+    else
+        if ipv4ValidCidr "$ip"; then
+            local ip_families=("inet")
         else
-            local blacklisted=1
-            debug "$FUNCNAME $ip is NOT blacklisted" 14
-        fi
-
-        if [ $blacklisted -eq 1 ]; then
-
-            if [ "$Option" == "add" ]; then
-                if [ ! -d /etc/labl.d ]; then
-                    mkdir -p /etc/labl.d &> /dev/null
-                    if [ $? -ne 0 ]; then
-                        aborting "[ERROR] mkdir -p /etc/labl.d failed"
-                    fi
+            if ipv6Valid "$ip"; then
+                local ip_families=("inet6")
+            else
+                if ipv6ValidCidr "$ip"; then
+                    local ip_families=("inet6")
+                else
+                    local ip_families=(${IP_Families[@]})
                 fi
+            fi
+        fi
+    fi
+    debug "ip_families = ${ip_families[@]}" 7
+
+    local ip_family
+    for ip_family in ${ip_families[@]}; do
+
+        local blacklisted=1
+        local whitelisted=1
+
+        # whitelist first
+        if [ $whitelist -eq 0 ]; then
+
+            debug "$FUNCNAME ip = $ip ($ip_family) $whitelist whitelist" 14
+
+            # remove it from blacklist
+            if lablCheck "$ip" blacklist quiet; then
+
+                debug "$FUNCNAME $ip exists in blacklist" 14
 
                 if lablRemove "$ip" blacklist quiet; then
-                    _echo "$ip removed from ${Ipset_Name}_${ip_family} blacklist" OK
-                fi
-
-                echo "$ip" >> /etc/labl.d/whitelist.add
-                sort -uV /etc/labl.d/whitelist.add -o /etc/labl.d/whitelist.add
-            fi
-
-            if [ $Ipset_Nomatch -eq 0 ]; then
-                # add it to whitelist
-                # TODO; revisit this logic; explicit whitelisting or implicit??
-                #if lablCheck "$ip" whitelist quiet; then
-                #echo "[-] $ip exists in whitelist"
-                #else
-                # right now it's explicit ...
-                ipset -exist add ${Ipset_Name}_${ip_family} $ip nomatch &> /dev/null
-                if lablCheck "$ip" whitelist quiet; then
-                    _echo "$ip added to ${Ipset_Name}_${ip_family} whitelist" OK
+                    local blacklisted=1
+                    _echo "$ip removed from blacklist" OK
                 else
-                    _echo "$FUNCNAME $ip was NOT added to ${Ipset_Name}_${ip_family} whitelist" WARNING
+                    local blacklisted=0
+                    _echo "$ip NOT removed from blacklist" NOTICE
                 fi
-                #fi
-                #else
-                #_echo "$ip was NOT added to ${Ipset_Name}_${ip_family} whitelist because $Ipset_Version does not support it" WARNING
-                # now it's possible to support adding to a whitelist file .. e.g. /etc/labl.d/whitelist.add
+
+                if lablCheck "$ip" blacklist quiet; then
+                    local blacklisted=0
+                    _echo "$ip NOT removed from blacklist" WARNING
+                fi
+            else
+                local blacklisted=1
+                debug "$FUNCNAME $ip is NOT in blacklist" 14
             fi
-        else
-            _echo "unable to whitelist $ip because it's currently blacklisted; try running '$Readlink_0 remove $ip blacklist'" WARNING
-        fi
 
-    fi
+            if [ $blacklisted -eq 1 ]; then
 
-    # blacklist second
-    if [ $blacklist -eq 0 ]; then
+                if [ "$Option" == "add" ]; then
+                    if [ ! -d /etc/labl.d ]; then
+                        mkdir -p /etc/labl.d &> /dev/null
+                        if [ $? -ne 0 ]; then
+                            aborting "[ERROR] mkdir -p /etc/labl.d failed"
+                        fi
+                    fi
 
-        debug "$FUNCNAME ip = $ip ($ip_family) $blacklist blacklist" 14
+                    if lablRemove "$ip" blacklist quiet; then
+                        _echo "$ip removed from blacklist" OK
+                    fi
 
-        # automating this part is subjective; works but needs work
+                    echo "$ip" >> /etc/labl.d/whitelist.add
+                    sort -uV /etc/labl.d/whitelist.add -o /etc/labl.d/whitelist.add
+                fi
 
-        if lablCheckWhitelists "$ip"; then
-            debug "$FUNCNAME $ip exists in a whitelist" 10
-        else
-            debug "$FUNCNAME [ALLOWING] $ip is NOT whitelisted" 10
-
-            # if it's not in a whitelist, remove it from nomatch set?
-            if [ "$Testing" != "" ]; then
-                if lablCheck "$ip" whitelist quiet; then
-
-                    debug "$FUNCNAME $ip exists in whitelist" 14
-                    local whitelisted=0
-
-                    if lablRemove "$ip" whitelist quiet; then
-                        _echo "$ip removed from ${Ipset_Name}_${ip_family} whitelist" OK
+                if [ $Ipset_Nomatch -eq 0 ]; then
+                    # add it to whitelist
+                    # TODO; revisit this logic; explicit whitelisting or implicit??
+                    #if lablCheck "$ip" whitelist quiet; then
+                    #echo "[-] $ip exists in whitelist"
+                    #else
+                    # right now it's explicit ...
+                    ipset -exist add ${Ipset_Name}_${ip_family} $ip nomatch &> /dev/null
+                    if lablCheck "$ip" whitelist quiet; then
+                        _echo "$ip added to whitelist" OK
                     else
-                        _echo "$ip was NOT removed from ${Ipset_Name}_${ip_family} whitelist" NOTICE
-                        local whitelisted=0
+                        _echo "$FUNCNAME $ip NOT added to whitelist" WARNING
                     fi
+                    #fi
+                    #else
+                    #_echo "$ip NOT added to whitelist because $Ipset_Version does not support it" WARNING
+                    # now it's possible to support adding to a whitelist file .. e.g. /etc/labl.d/whitelist.add
+                fi
+            else
+                _echo "unable to whitelist $ip because it's currently blacklisted; try running '$Readlink_0 remove $ip blacklist'" WARNING
+            fi
 
-                    if lablCheck "$ip" whitelist; then
-                        debug "$FUNCNAME [WARNING] $ip was NOT removed from ${Ipset_Name}_${ip_family} whitelist" 2
+        fi
+
+        # blacklist second
+        if [ $blacklist -eq 0 ]; then
+
+            debug "$FUNCNAME ip = $ip ($ip_family) $blacklist blacklist" 14
+
+            # automating this part is subjective; works but needs work
+
+            if lablCheckWhitelists "$ip"; then
+                debug "$FUNCNAME $ip exists in a whitelist" 10
+                _echo "$ip NOT blacklisted" NOTICE
+                continue
+            else
+                debug "$FUNCNAME [ALLOWING] $ip is NOT in a whitelist" 10
+
+                # if it's not in a whitelist, remove it from nomatch set?
+                if [ "$Testing" != "" ]; then
+                    if lablCheck "$ip" whitelist quiet; then
+
+                        debug "$FUNCNAME $ip exists in whitelist" 14
+                        local whitelisted=0
+
+                        if lablRemove "$ip" whitelist quiet; then
+                            _echo "$ip removed from whitelist" OK
+                        else
+                            _echo "$ip NOT removed from whitelist" NOTICE
+                            local whitelisted=0
+                        fi
+
+                        if lablCheck "$ip" whitelist; then
+                            debug "$FUNCNAME [WARNING] $ip NOT removed from whitelist" 2
+                            local whitelisted=0
+                        fi
+                    else
+                        debug "$FUNCNAME $ip is NOT in whitelist" 14
                         local whitelisted=0
                     fi
-                else
-                    debug "$FUNCNAME $ip is NOT whitelisted" 14
-                    local whitelisted=0
                 fi
             fi
-        fi
 
-        # add it to blacklist
-        if lablCheck "$ip" blacklist quiet; then
-            _echo "$ip already blacklisted" OK
-        else
-            ipset -exist add ${Ipset_Name}_${ip_family} $ip &> /dev/null
+            # add it to blacklist
             if lablCheck "$ip" blacklist quiet; then
-                _echo "[+++] $ip added to ${Ipset_Name}_${ip_family} blacklist" OK
+                _echo "$ip is already blacklisted" OK
+            else
+                ipset -exist add ${Ipset_Name}_${ip_family} $ip &> /dev/null
+                if lablCheck "$ip" blacklist quiet; then
+                    _echo "[+++] $ip added to blacklist" OK
+                fi
             fi
+
         fi
+    done
+    unset ip_family
 
-    fi
-
-    unset -v ip_family
 }
 
 # automatically add *new* ip address(es) or range(s) to the appropriate ipset
 function lablAuto() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
-    local blacklist ip_family ipset_family_save
-    local -i labl_running=0
+    # check if labl is already running (properly)
+    let local labl_running=0
 
-
+    local ip_family
     for ip_family in ${IP_Families[@]}; do
         ipset -q -t list ${Ipset_Name}_${ip_family} &> /dev/null
         if [ $? -ne 0 ]; then
-            labl_running=1
+            let local labl_running=1
         fi
     done
-    ip_family=""
+    unset ip_family
 
     # if it's not running properly, then restart, else add *only new* addresses to the ipsets
     if [ $labl_running -eq 1 ]; then
         lablStop
         lablStart
     else
-        lablLoadBlacklists blacklist
         lablLoadWhitelists whitelist
+        lablLoadBlacklists blacklist
     fi
 
     local ipset_save=/var/tmp/labl.auto.save
     lablSave $ipset_save
 
+    local ip_family
     for ip_family in ${IP_Families[@]}; do
-        ipset_family_save="${ipset_save}.${Ipset_Name}_${ip_family}"
-        if [ -f "${ipset_family_save}" ]; then
-            cp ${ipset_family_save} ${ipset_family_save}.new
+        local ipset_families_save="${ipset_save}.${Ipset_Name}_${ip_family}"
+        if [ -f "${ipset_families_save}" ]; then
+            cp ${ipset_families_save} ${ipset_families_save}.new
         else
-            aborting "[ERROR] can't find ${ipset_family_save}"
+            aborting "[ERROR] can't find ${ipset_families_save}"
         fi
     done
-    ip_family=""
-    ipset_family_save=""
+    unset ip_family
 
 
+    local blacklist
     for blacklist in ${Blacklists[@]}; do
         debug "$FUNCNAME blacklist = $blacklist" 50
 
-        if ip_family=$(ipFamily $blacklist); then
-            ipset_family_save="${ipset_save}.${Ipset_Name}_${ip_family}"
-            echo add labl_inet $blacklist | sed -e '/\/32/s///g' -e '/\/64/s///g' >> ${ipset_family_save}.new
+        local ip_family
+
+        if ipv4Valid "$blacklist"; then
+            local ip_family=("inet")
         else
-            _echo "$FUNCNAME ip '$ip' ip_family is unsupported" WARNING
+            if ipv4ValidCidr "$blacklist"; then
+                local ip_family=("inet")
+            else
+                if [ $IP6 -eq 0 ]; then
+                    local ip_family=("inet6")
+                fi
+            fi
         fi
 
-        ip_family=""
-    done
-    ipset_family_save=""
+        if [ "$ip_family" != "" ]; then
+            local ipset_family_save="${ipset_save}.${Ipset_Name}_${ip_family}"
+            echo add labl_inet $blacklist | sed -e '/\/32/s///g' -e '/\/64/s///g' >> ${ipset_family_save}.new
+        fi
 
+        unset ip_family
+
+    done
+
+    local ip_family
     for ip_family in ${IP_Families[@]}; do
-        ipset_family_save="${ipset_save}.${Ipset_Name}_${ip_family}"
-        sort -ruV ${ipset_family_save}.new -o ${ipset_family_save}.new
+        local ipset_families_save="${ipset_save}.${Ipset_Name}_${ip_family}"
+        sort -ruV ${ipset_families_save}.new -o ${ipset_families_save}.new
         local blacklist_add
-        for blacklist_add in $(diff ${ipset_family_save} ${ipset_family_save}.new 2> /dev/null | grep ^\> | awk '{print $NF}'); do
+        for blacklist_add in $(diff ${ipset_families_save} ${ipset_families_save}.new 2> /dev/null | grep ^\> | awk '{print $NF}'); do
             lablAdd $blacklist_add blacklist
         done
-        unset -v blacklist_add
+        unset blacklist_add
     done
-
-    unset -v blacklist ip_family ipset_family_save ipset_save
+    unset ip_family
 
 }
 
 
 # check if an ip address or range is in an ipset
 function lablCheck() {
-
-    local ip blacklist whitelist quiet
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     if [ "$1" == "" ]; then
-        ip=$IP_Address
+        local ip="$IP_Address"
     else
-        ip=$1
+        local ip="$1"
     fi
 
     if [ "$ip" == "" ]; then
@@ -453,93 +542,114 @@ function lablCheck() {
         return 1
     fi
 
-    if [ "$2" == "blacklist" ]; then
-        blacklist=0
+    if [ "$2" == "whitelist" ]; then
+        local whitelist=0
     else
-        blacklist=1
+        local whitelist=1
     fi
 
-    if [ "$2" == "whitelist" ]; then
-        whitelist=0
+    if [ "$2" == "blacklist" ]; then
+        local blacklist=0
     else
-        whitelist=1
+        local blacklist=1
     fi
 
     if [ "$2" == "" ]; then
         if [ "$Ipset_Mode" == "whitelist" ]; then
-            whitelist=0
-            blacklist=1
+            local whitelist=0
+            local blacklist=1
         else
-            whitelist=1
-            blacklist=0
+            local whitelist=1
+            local blacklist=0
         fi
     fi
 
     if [ "$2" == "all" ]; then
-        blacklist=0
-        whitelist=0
+        local blacklist=0
+        local whitelist=0
     fi
 
     if [ "$3" == "quiet" ]; then
-        quiet=0
+        local quiet=0
     else
-        quiet=1
+        local quiet=1
     fi
+
+    # ip_families is local here because the given ip may be either a v4 inet addres *or* a v6 inet6 address (or maybe both)
+    if ipv4Valid "$ip"; then
+        local ip_families=("inet")
+    else
+        if ipv4ValidCidr "$ip"; then
+            local ip_families=("inet")
+        else
+            if ipv6Valid "$ip"; then
+                local ip_families=("inet6")
+            else
+                if ipv6ValidCidr "$ip"; then
+                    local ip_families=("inet6")
+                else
+                    local ip_families=(${IP_Families[@]})
+                fi
+            fi
+        fi
+    fi
+    debug "ip_families = ${ip_families[@]}" 7
 
     local ip_family
-    if ! ip_family=$(ipFamily $ip); then
-        _echo "$FUNCNAME ip '$ip' ip_family is unsupported" WARNING
-        return 1
-    fi
+    for ip_family in ${ip_families[@]}; do
 
-    let blacklisted=1
-    let whitelisted=1
+        let whitelisted=1
+        let blacklisted=1
+        #let quiet=1
 
-    if [ $whitelist -eq 0 ]; then
-        debug "$FUNCNAME ip = $ip ($ip_family) whitelist" 5
-        # nomatch tests are true for both 'nomatch' rules and absence of specific match rules
-        # TODO; fix stdout ... misleading
-        ipset test ${Ipset_Name}_${ip_family} $ip &> /dev/null
-        if [ $? -ne 0 ]; then
-            let whitelisted=0
-            if [ $quiet -eq 1 ]; then
-                _echo "$ip is whitelisted" CHECK
+        if [ $whitelist -eq 0 ]; then
+            debug "$FUNCNAME ip = $ip ($ip_family) whitelist" 5
+            # nomatch tests are true for both 'nomatch' rules and absence of specific match rules
+            # TODO; fix stdout ... misleading
+            ipset test ${Ipset_Name}_${ip_family} $ip &> /dev/null
+            if [ $? -ne 0 ]; then
+                let whitelisted=0
+                if [ $quiet -eq 1 ]; then
+                    _echo "$ip is whitelisted" CHECK
+                fi
+            else
+                let whitelisted=1
+                if [ $quiet -eq 1 ]; then
+                    _echo "$ip is NOT whitelisted" CHECK
+                fi
             fi
-        else
-            let whitelisted=1
-            if [ $quiet -eq 1 ]; then
-                _echo "$ip is NOT whitelisted" CHECK
+            if [ $blacklist -eq 1 ]; then
+                return $whitelisted
             fi
         fi
-        if [ $blacklist -eq 1 ]; then
-            return $whitelisted
-        fi
-    fi
 
-    if [ $blacklist -eq 0 ]; then
-        debug "$FUNCNAME ip = $ip ($ip_family) blacklist" 5
-        ipset test ${Ipset_Name}_${ip_family} $ip &> /dev/null
-        if [ $? -eq 0 ]; then
-            let blacklisted=0
-            if [ $quiet -eq 1 ]; then
-                _echo "$ip is blacklisted" CHECK
+        if [ $blacklist -eq 0 ]; then
+            debug "$FUNCNAME ip = $ip ($ip_family) blacklist" 5
+            ipset test ${Ipset_Name}_${ip_family} $ip &> /dev/null
+            if [ $? -eq 0 ]; then
+                let blacklisted=0
+                if [ $quiet -eq 1 ]; then
+                    _echo "$ip is blacklisted" CHECK
+                fi
+            else
+                let blacklisted=1
+                if [ $quiet -eq 1 ]; then
+                    _echo "$ip is NOT blacklisted" CHECK
+                fi
             fi
-        else
-            let blacklisted=1
-            if [ $quiet -eq 1 ]; then
-                _echo "$ip is NOT blacklisted" CHECK
+            if [ $whitelist -eq 1 ]; then
+                return $blacklisted
             fi
         fi
-        if [ $whitelist -eq 1 ]; then
-            return $blacklisted
-        fi
-    fi
+    done
+    unset ip_family
 
     return 1
 }
 
 # check if an ip address or range is in a whitelist
 function lablCheckWhitelists() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     if [ "$1" == "" ]; then
         local ip="$IP_Address"
@@ -555,57 +665,61 @@ function lablCheckWhitelists() {
 
     lablLoadWhitelists whitelist
 
-    # the following (depends on subnetcalc) to check host ranges; TODO: write (or find) a better alternative
-
     local ip_range=$(subnetcalc $ip -n -nocolor 2> /dev/null | grep ^Host\ Range)
     debug "$FUNCNAME ip_range = $ip_range" 10
 
-    local -i whitelist_match=1
+    let local whitelist_match=1
 
     local whitelist
     for whitelist in ${Whitelists[@]}; do
         debug "$FUNCNAME whitelist = $whitelist" 10
 
         # don't check empty whitelist
-        if [ ${#whitelist} -eq 0 ]; then
+        if [ "$whitelist" == "" ]; then
             continue
         fi
 
         # perfect match
         if [ "$ip" == "$whitelist" ]; then
             debug "$FUNCNAME ip = $ip, whitelist = $whitelist [MATCH, PERFECT]" 22
-            local -i whitelist_match=0
+            let local whitelist_match=0
             break
         fi
 
         if [[ "$whitelist" == *"/"* ]]; then
-            local whitelist_bits=${whitelist##*/} # ${0##*/}
+            local whitelist_cidr=${whitelist##*/} # ${0##*/}
         else
-            local whitelist_bits=""
+            local whitelist_cidr=""
         fi
 
-        # make sure whitelist_bits is an integer
-        if [[ ! $whitelist_bits =~ ^[0-9]+$ ]]; then
-            local whitelist_bits=""
+        # make sure whitelist_cidr is an integer
+        if [[ ! $whitelist_cidr =~ ^[0-9]+$ ]]; then
+            local whitelist_cidr=""
         fi
 
-        if [ "$whitelist_bits" == "$whitelist" ]; then
-            _error "whitelist_bits == whitelist $whitelist" 3 ERROR # should be dead code, now; leaving to be sure
+        if [ "$whitelist_cidr" == "$whitelist" ]; then
+            _error "whitelist_cidr == whitelist $whitelist" 3 ERROR # should be dead code, now; leaving to be sure
             continue
         fi
 
         # if it's not a perfect match, and the whitelist has no host range, then checking other point to point links is pointless
-        if [ "$whitelist_bits" == "" ]; then
+        if [ "$whitelist_cidr" == "" ]; then
             debug "$FUNCNAME ip = $ip, whitelist = $whitelist [SKIP, IMPOSSIBLE]" 4
             continue
         fi
 
-        debug "$FUNCNAME ip = $ip, whitelist = $whitelist, whitelist_bits = $whitelist_bits" 12
+        # the following (depends on subnetcalc) to check host ranges; TODO: write (or find) a better alternative
 
-        # strip the bits off the ip, replace it with the whitelist mask, & compare ranges
+        debug "$FUNCNAME " 20
+        debug "$FUNCNAME ip = $ip, whitelist = $whitelist, whitelist_cidr = $whitelist_cidr" 2
+        debug "$FUNCNAME " 20
+
+        debug "$FUNCNAME ip = $ip, whitelist = $whitelist [OK, CHECK]" 22
+
+        # strip the cidr off the ip, replace it with the whitelist mask, & compare ranges
         ip_whitelist=${ip%%/*}
-        if [ "$whitelist_bits" != "" ]; then
-            ip_whitelist+="/$whitelist_bits"
+        if [ "$whitelist_cidr" != "" ]; then
+            ip_whitelist+="/$whitelist_cidr"
         fi
         local whitelist_range=$(subnetcalc $whitelist -n -nocolor 2> /dev/null | grep ^Host\ Range)
         local ip_whitelist_range=$(subnetcalc $ip_whitelist -n -nocolor 2> /dev/null | grep ^Host\ Range)
@@ -613,41 +727,38 @@ function lablCheckWhitelists() {
             _echo "subnetcalc has an empty host range for ip '$ip' in whitelist '$whitelist'" WARNING
         else
             if [ "$whitelist_range" == "$ip_whitelist_range" ]; then
+                let local whitelist_match=0
                 debug "$FUNCNAME ip = $ip, whitelist = $whitelist [MATCH, RANGE]" 22
                 debug "$FUNCNAME ip = $ip, whitelist = $whitelist ip_whitelist = $ip_whitelist" 14
                 debug "$FUNCNAME ip_whitelist_range = $ip_whitelist_range ($ip_whitelist)" 14
-                local -i whitelist_match=0
-                break
             fi
         fi
 
         debug "$FUNCNAME ip_range           = $ip_range ($ip)" 14
         debug "$FUNCNAME whitelist_range    = $whitelist_range ($whitelist)" 14
 
+        if [ $whitelist_match -eq 0 ]; then
+            debug "$FUNCNAME ip = $ip AND whitelist = $whitelist [MATCH]" 5
+            _echo "$ip is whitelisted" NOTICE
+            return 0
+        fi
+
     done
-    unset -v whitelist
+    unset whitelist
 
     # debt; new
     # to be ultra safe, ensuring a larger range isn't allowed if a lower range is whitelisted (that's not a point to point)
     # this is especially IMPORTANT when using older versions of ipset that do *not* support nomatch, e.g. ipset v6.11 (RHEL 6)
     # i.e. 10.11.12.224/27 is whitelisted & 10.11.12.0/24 is blacklisted; 10.11.12.0/24 is allowed with only the above logic
 
-    if [ $whitelist_match -eq 0 ]; then
-        debug "$FUNCNAME ip = $ip AND whitelist = $whitelist [MATCH]" 5
-        _echo "$ip is whitelisted" NOTICE
-        if lablRemove "$ip" blacklist quiet; then
-            _echo "$ip removed from ${Ipset_Name}_${ip_family} blacklist" OK
-        fi
-        return 0
-    else
-        return 1
-    fi
+    return 1
 
     # TODO better ipv6 whitelist support
 }
 
 # output list of standard locations found for a given filename that's readable
 function lablFindLists() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     local find_lists="$1"
     if [ "$find_lists" == "" ]; then
@@ -676,7 +787,7 @@ function lablFindLists() {
                     debug "$FUNCNAME candidate = $candidate (not readable)" 30
                 fi
             done <<< "$(find "${find_dir}" -maxdepth 1 -type f -name "*${find_lists}*" 2> /dev/null | sort -u)" # only files in this directory; do not recurse
-            unset -v candidate
+            unset candidate
         fi
     done
 
@@ -692,6 +803,7 @@ function lablFindLists() {
 
 # initialize all dependencies, etc.
 function lablInit() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     if [ "$USER" != "root" ]; then
         aborting "must be root" 3
@@ -720,7 +832,7 @@ function lablInit() {
             aborting "FAILED which dependency '$dependency'" 3
         fi
     done
-    unset -v dependency
+    unset dependency
 
     Basename_0=$(basename $0)
     Dirname_0="$(dirname $0)"
@@ -737,7 +849,6 @@ function lablInit() {
     fi
 
     if [ -r "$(dirname ${Readlink_0})/../include/debug-bash/Debug.bash" ]; then
-        # not necessariliy required, but nice to have
         source "$(dirname ${Readlink_0})/../include/debug-bash/Debug.bash"
     fi
 
@@ -756,24 +867,22 @@ function lablInit() {
 
     IP_Families=()
 
-    # cat /proc/sys/net/ipv6/conf/*/disable_ipv6 
-    # export vv=$(</proc/sys/net/ipv6/conf/all/disable_ipv6) && echo $vv
-    IP6_Enabled=1 # false
+    IP6=1 # false
     if [[ "$(ip -6 a s)" != "" ]]; then
         Dependencies+=(ip6tables)
-        IP6_Enabled=0 # true
+        IP6=0 # true
         IP_Families+=(inet6)
     fi
 
-    IP4_Enabled=1 # false
+    IP4=1 # false
     if [[ "$(ip -4 a s)" != "" ]]; then
         Dependencies+=(iptables)
-        IP4_Enabled=0 # true
+        IP4=0 # true
         IP_Families+=(inet)
     fi
 
     if [ "$IP_Families" == "" ]; then
-        aborting "unable to determine what IP famlies are supported on this machine"
+        aborting "unable to determine what IP famlies are support on this machine"
     fi
 
     # re-check dependencies
@@ -784,7 +893,7 @@ function lablInit() {
             aborting "FAILED which dependency '$dependency'" 3
         fi
     done
-    unset -v dependency
+    unset dependency
 
     if [ "$Basename_0" == "blacklist" ]; then
         Ipset_Mode="blacklist"
@@ -909,6 +1018,7 @@ function lablInit() {
 
 # load lists of validated ips from file(s)
 function lablLoad() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     if [ "$1" == "" ]; then
         debug "$FUNCNAME passed no arguments to $FUNCNAME" 14
@@ -928,7 +1038,7 @@ function lablLoad() {
         else
             debug "$FUNCNAME load_candidate = $load_candidate (not readable)" 33
         fi
-        unset -v load_candidate
+        unset load_candidate
     done
     debug "$FUNCNAME load_files = $(echo ${load_files[@]})" 10
 
@@ -948,24 +1058,24 @@ function lablLoad() {
                     while read load_line; do
                         load_candidates+=($load_line)
                     done <<< "$(bash "$load_file" "$Option" | egrep -e '^[0-9]|^[a-f]|^[A-F]' | awk '{print $1}')" # must be one ip per line
-                    unset -v load_line
+                    unset load_line
                 else
                     debug "$FUNCNAME load_file = $load_file (cat)" 10
                     local load_line
                     while read load_line; do
                         load_candidates+=($load_line)
                     done <<< "$(cat "$load_file" | egrep -e '^[0-9]|^[a-f]|^[A-F]' | awk '{print $1}')" # must be one ip per line
-                    unset -v load_line
+                    unset load_line
                 fi
             fi
         done
-        unset -v load_file
+        unset load_file
 
         local load_ips=()
 
         local load_candidates_uniq=($(printf "%s\n" ${load_candidates[@]} | sort -Vu))
         load_candidates=(${load_candidates_uniq[@]})
-        unset -v load_candidates_uniq
+        unset load_candidates_uniq
 
         local load_candidate
         for load_candidate in ${load_candidates[@]}; do
@@ -981,13 +1091,9 @@ function lablLoad() {
 
             debug "$FUNCNAME load_candidate = $load_candidate" 30
 
-            local -i valid_load_candidate=1
-            if ipv4Valid "$load_candidate"; then
-                valid_load_candidate=0
-            else
-                if ipv6Valid "$load_candidate"; then
-                    valid_load_candidate=0
-                fi
+            let local valid_load_candidate=1
+            if ipValid "$load_candidate"; then
+                let local valid_load_candidate=0
             fi
 
             if [ $valid_load_candidate -eq 0 ]; then
@@ -995,12 +1101,12 @@ function lablLoad() {
                 load_ips+=($load_candidate)
             else
                 if [ $Status_Flag -eq 1 ] ; then
-                    _echo "ignoring IP '$load_candidate'" WARNING
+                    _echo "ignoring invalid IP '$load_candidate'" WARNING
                 fi
             fi
 
         done
-        unset -v load_candidate
+        unset load_candidate
 
         if [[ "${load_ips[@]}" ]]; then
             echo "${load_ips[@]}"
@@ -1013,6 +1119,7 @@ function lablLoad() {
 
 # load named blacklists into global $Blacklists & $Blacklists_Files
 function lablLoadBlacklists() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     if [ "$1" == "" ]; then
         local -l list_labl=blacklist
@@ -1026,8 +1133,6 @@ function lablLoadBlacklists() {
             debug "$FUNCNAME blacklists already loaded" 10
             return 0
         fi
-    else
-        debug "$FUNCNAME blacklists are being loaded" 1
     fi
 
     Blacklists_Files=($(lablFindLists $list_labl))
@@ -1040,20 +1145,18 @@ function lablLoadBlacklists() {
             debug "$FUNCNAME blacklist = $blacklist" 13
             Blacklists+=($blacklist)
         done
-        unset -v blacklist
+        unset blacklist
     fi
 
     if [[ ${Blacklists[@]} ]]; then
-        if [ $Verbose_Flag -eq 0 ] || [ "$2" == "verbose" ]; then
-            if [[ ${Blacklists_Files[@]} ]]; then
-                local blacklist_file
-                for  blacklist_file in ${Blacklists_Files[@]}; do
-                    _echo "blacklist loaded from $blacklist_file" OK
-                done
-                unset -v blacklist_file
-                return 0
-            fi
-        else
+        if [[ ${Blacklists_Files[@]} ]]; then
+            local blacklist_from
+            for  blacklist_from in ${Blacklists_Files[@]}; do
+                if [ $Verbose_Flag -eq 0 ] || [ "$2" == "verbose" ]; then
+                    _echo "blacklist loaded from $blacklist_from" OK
+                fi
+            done
+            unset blacklist_from
             return 0
         fi
     fi
@@ -1063,6 +1166,7 @@ function lablLoadBlacklists() {
 
 # load named whitelists into global $Whitelists & $Whitelists_Files
 function lablLoadWhitelists() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     if [ "$1" == "" ]; then
         local -l list_labl=whitelist
@@ -1076,8 +1180,6 @@ function lablLoadWhitelists() {
             debug "$FUNCNAME whitelists already loaded" 10
             return 0
         fi
-    else
-        debug "$FUNCNAME whitelists are being loaded" 1
     fi
 
     Whitelists_Files=($(lablFindLists $list_labl))
@@ -1090,20 +1192,18 @@ function lablLoadWhitelists() {
             debug "$FUNCNAME whitelist = $whitelist" 13
             Whitelists+=($whitelist)
         done
-        unset -v whitelist
+        unset whitelist
     fi
 
     if [[ ${Whitelists[@]} ]]; then
-        if [ $Verbose_Flag -eq 0 ] || [ "$2" == "verbose" ]; then
-            if [[ ${Whitelists_Files[@]} ]]; then
-                local whitelist_file
-                for whitelist_file in ${Whitelists_Files[@]}; do
-                    _echo "whitelist loaded from $whitelist_file" OK
-                done
-                unset -v whitelist_file
-                return 0
-            fi
-        else
+        if [[ ${Whitelists_Files[@]} ]]; then
+            local whitelist_from
+            for  whitelist_from in ${Whitelists_Files[@]}; do
+                if [ $Verbose_Flag -eq 0 ]; then
+                    _echo "whitelist loaded from $whitelist_from" OK
+                fi
+            done
+            unset whitelist_from
             return 0
         fi
     fi
@@ -1113,6 +1213,7 @@ function lablLoadWhitelists() {
 
 # remove an ip address or range from an ipset
 function lablRemove() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     if [ "$1" == "" ]; then
         local ip="$IP_Address"
@@ -1158,64 +1259,83 @@ function lablRemove() {
         local quiet=1
     fi
 
-    local ip_family
-    if ! ip_family=$(ipFamily $ip); then
-        _echo "$FUNCNAME ip '$ip' ip_family is unsupported" WARNING
-        return 1
+    # ip_families is local here because the given ip may be either a v4 inet addres *or* a v6 inet6 address (or maybe both)
+    if ipv4Valid "$ip"; then
+        local ip_families=("inet")
+    else
+        if ipv4ValidCidr "$ip"; then
+            local ip_families=("inet")
+        else
+            if ipv6Valid "$ip"; then
+                local ip_families=("inet6")
+            else
+                if ipv6ValidCidr "$ip"; then
+                    local ip_families=("inet6")
+                else
+                    local ip_families=(${IP_Families[@]})
+                fi
+            fi
+        fi
     fi
+    debug "ip_families = ${ip_families[@]}" 7
 
-    local blacklist_removed=1
-    local whitelist_removed=1
+    for ip_family in ${ip_families[@]}; do
 
-    debug "$FUNCNAME ip = $ip ($ip_family) blacklist=$blacklist whitelist=$whitelist" 10
+        local blacklist_removed=1
+        local whitelist_removed=1
+        #local quiet=1
 
-    if [ $blacklist -eq 0 ]; then
-        if lablCheck "$ip" blacklist quiet; then
-            ipset del ${Ipset_Name}_${ip_family} $ip
+        if [ $blacklist -eq 0 ]; then
+            debug "$FUNCNAME ip = $ip ($ip_family) blacklist" 14
+
             if lablCheck "$ip" blacklist quiet; then
-                _echo "$ip is still in blacklist (manually check the CIDR ranges)" WARNING
+                ipset del ${Ipset_Name}_${ip_family} $ip
+                if lablCheck "$ip" blacklist quiet; then
+                    _echo "$ip is still in blacklist (manually check the CIDR ranges)" WARNING
+                else
+                    local blacklist_removed=0
+                    if [ $quiet -eq 1 ]; then
+                        _echo "$ip removed from blacklist" REMOVE
+                    fi
+                fi
             else
                 local blacklist_removed=0
                 if [ $quiet -eq 1 ]; then
-                    _echo "$ip removed from ${Ipset_Name}_${ip_family} blacklist" REMOVE
+                    _echo "$ip is NOT in blacklist" REMOVE
                 fi
             fi
-        else
-            if [ $quiet -eq 1 ]; then
-                _echo "$ip is NOT blacklisted" REMOVE
+
+            if [ $blacklist -eq 1 ] && [ $whitelist -eq 0 ]; then
+                return $blacklist_removed
             fi
         fi
 
-        if [ $whitelist -eq 1 ]; then
-            return $blacklist_removed
-        fi
-    fi
+        if [ $whitelist -eq 0 ]; then
+            debug "$FUNCNAME ip = $ip ($ip_family) whitelist" 14
 
-    if [ $whitelist -eq 0 ]; then
-        if lablCheck "$ip" whitelist quiet; then
-            ipset del ${Ipset_Name}_${ip_family} $ip
             if lablCheck "$ip" whitelist quiet; then
-                _echo "$ip is still in whitelist (manually check the CIDR ranges)" WARNING
+                ipset del ${Ipset_Name}_${ip_family} $ip
+                if lablCheck "$ip" whitelist quiet; then
+                    _echo "$ip is still in whitelist (manually check the CIDR ranges)" WARNING
+                else
+                    local whitelist_removed=0
+                    if [ $quiet -eq 1 ]; then
+                        _echo "$ip removed from whitelist" REMOVE
+                    fi
+                fi
             else
                 local whitelist_removed=0
                 if [ $quiet -eq 1 ]; then
-                    _echo "$ip removed from ${Ipset_Name}_${ip_family} whitelist" REMOVE
+                    _echo "$ip is NOT in whitelist" REMOVE
                 fi
             fi
-        else
-            if [ $quiet -eq 1 ]; then
-                _echo "$ip is NOT whitelisted" REMOVE
+
+            if [ $blacklist -eq 0 ] && [ $whitelist -eq 1 ]; then
+                return $blacklist_removed
             fi
         fi
 
-        if [ $blacklist -eq 1 ]; then
-            return $whitelist_removed
-        fi
-    fi
-
-    debug "$FUNCNAME ip = $ip ($ip_family) blacklist & whitelist was NOT removed" 1
-
-    return 1
+    done
 
 }
 
@@ -1226,6 +1346,7 @@ function lablRestore() {
 
 # save ipsets
 function lablSave() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     if [ "$1" == "" ]; then
         local ipset_save="${Tmp_File}.save"
@@ -1246,25 +1367,26 @@ function lablSave() {
         fi
         ipset save ${Ipset_Name}_${ip_family} | sort -ruV > "$ipset_family_save"
     done
-    unset -v ip_family
+    unset ip_family
 
 }
 
 # check & if needed, create ipsets and iptables/ip6tables rules
 function lablStart() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     local table_exec
 
     local ip_family
     for ip_family in ${IP_Families[@]}; do
-        unset -v table_exec
+        unset table_exec
 
         if [ "$ip_family" == "inet" ]; then
-            if [ $IP4_Enabled -eq 0 ]; then
+            if [ $IP4 -eq 0 ]; then
                 table_exec="iptables"
             fi
         else
-            if [ $IP6_Enabled -eq 0 ]; then
+            if [ $IP6 -eq 0 ]; then
                 table_exec="ip6tables"
             fi
         fi
@@ -1298,7 +1420,7 @@ function lablStart() {
         # iptables/ip6tables bug ...; sometimes results aren't produced on the first try ... :/
         local table_count=0
 
-        local -i table_try=3
+        let local table_try=3
         while [ $table_try -gt 0 ]; do
             if [ $table_count -eq 0 ]; then
                 local table_count=$($table_exec -n -L INPUT | grep ^DROP.*match-set.labl_${ip_family}.src | wc -l)
@@ -1328,10 +1450,15 @@ function lablStart() {
         fi
 
     done
-    unset -v ip_family
+    unset ip_family
 
     if [ $Verbose_Flag -eq 0 ]; then
         printf "\n"
+    fi
+
+    if [ $Iptables_Flag -eq 0 ] && [ "$1" == "iptables" ]; then
+        _echo "$Basename_0 start successful" "OK"
+        return
     fi
 
     lablLoadBlacklists blacklist
@@ -1343,14 +1470,12 @@ function lablStart() {
 
     if usageOptionSingle $Option; then
 
-        # whitelist, then blacklist
-
         local whitelist
         for whitelist in ${Whitelists[@]}; do
             debug "$FUNCNAME whitelist = $whitelist" 10
             lablAdd $whitelist whitelist
         done
-        unset -v whitelist
+        unset whitelist
 
         if [ $Verbose_Flag -eq 0 ]; then
             printf "\n"
@@ -1361,7 +1486,20 @@ function lablStart() {
             debug "$FUNCNAME blacklist = $blacklist" 10
             lablAdd $blacklist blacklist
         done
-        unset -v blacklist
+        unset blacklist
+
+        if [ $Verbose_Flag -eq 0 ]; then
+            printf "\n"
+        fi
+
+        # whitelisting a second time allows whitelists to override blacklists
+
+        local whitelist
+        for whitelist in ${Whitelists[@]}; do
+            debug "$FUNCNAME whitelist = $whitelist" 10
+            lablAdd $whitelist whitelist
+        done
+        unset whitelist
 
         if [ $Verbose_Flag -eq 0 ]; then
             printf "\n"
@@ -1377,10 +1515,11 @@ function lablStart() {
 
 # list contents of all ipsets & iptables rules
 function lablStatus() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     Status_Flag=0
 
-    local -i labl_running=1
+    let local labl_running=1
 
     local ipset_match=""
     if [ $Ipset_Nomatch -eq 0 ]; then
@@ -1403,19 +1542,19 @@ function lablStatus() {
 
     local ip_family
     for ip_family in ${IP_Families[@]}; do
-        unset -v table_exec
+        unset table_exec
 
         if [ "$ip_family" == "inet" ]; then
-            if [ $IP4_Enabled -eq 0 ]; then
+            if [ $IP4 -eq 0 ]; then
                 table_exec="iptables"
             fi
         else
-            if [ $IP6_Enabled -eq 0 ]; then
+            if [ $IP6 -eq 0 ]; then
                 table_exec="ip6tables"
             fi
         fi
 
-        if [ ${#table_exec} -eq 0 ]; then
+        if [ "$table_exec" == "" ]; then
             continue
         fi
 
@@ -1423,16 +1562,16 @@ function lablStatus() {
 
         ipset -q -t list ${Ipset_Name}_${ip_family} &> /dev/null
         if [ $? -eq 0 ]; then
-            labl_running=0
+            let local labl_running=0
 
             if [ $ip_family_count -eq 0 ]; then
-                printf -- "----------------------------------------------------------------\n"
+                echo "----------------------------------------------------------------"
+                echo
                 let ip_family_count=$ip_family_count+1
             fi
 
-            ipset list ${Ipset_Name}_${ip_family} 2> /dev/null > /var/tmp/${Ipset_Name}_${ip_family}.status.${Timestamp}
+            ipset -t list ${Ipset_Name}_${ip_family} 2> /dev/null > /var/tmp/${Ipset_Name}_${ip_family}.status.${Timestamp}
             if [ -r /var/tmp/${Ipset_Name}_${ip_family}.status.${Timestamp} ]; then
-                printf "\n"
                 cat /var/tmp/${Ipset_Name}_${ip_family}.status.${Timestamp}
             fi
 
@@ -1441,7 +1580,7 @@ function lablStatus() {
             # iptables/ip6tables bug ...; sometimes they doesn't produce results on the first try ...
             local table_count=0
 
-            local -i table_try=3
+            let local table_try=3
             while [ $table_try -gt 0 ]; do
                 if [ $table_count -eq 0 ]; then
                     table_count=$($table_exec -n -L INPUT | grep ^DROP.*match-set.labl_${ip_family}.src | wc -l)
@@ -1450,15 +1589,24 @@ function lablStatus() {
                 fi
                 ((--table_try))
             done
+
             debug "$FUNCNAME table_try = $table_try" 10
-            printf "\n"
+
+            echo
+
             if [ $table_count -eq 0 ]; then
-                printf "[-] $table_exec --match-set ${Ipset_Name}_${ip_family} was NOT loaded\n"
+                echo "[-] $table_exec --match-set ${Ipset_Name}_${ip_family} is NOT loaded"
             else
                 if [ $table_count -eq 1 ]; then
-                    printf "[+] $table_exec --match-set ${Ipset_Name}_${ip_family} loaded\n\n"
+                    echo "[+] $table_exec --match-set ${Ipset_Name}_${ip_family} is loaded"
+                    echo
                 else
-                    printf "[WARNING] $table_exec --match-set ${Ipset_Name}_${ip_family} loaded $table_count times\n\n"
+                    echo "[WARNING] $table_exec --match-set ${Ipset_Name}_${ip_family} is loaded $table_count times"
+                    echo
+                fi
+
+                if [ "$1" != "permanent" ] && [ "$1" != "verbose" ]; then
+                    continue
                 fi
 
                 lablLoadBlacklists blacklist
@@ -1468,51 +1616,53 @@ function lablStatus() {
                 # blacklist status
                 #
 
-                local -i labl_blacklist_count=$(ipset save ${Ipset_Name}_${ip_family} | grep ^add | grep -v nomatch$ | wc -l)
+                let local labl_blacklist_count=$(ipset save ${Ipset_Name}_${ip_family} | grep ^add | grep -v nomatch$ | wc -l)
                 if [ $labl_blacklist_count -eq 0 ]; then
-                    local -i labl_blacklists_count=1
+                    let local labl_blacklists_count=1
                 else
-                    local -i labl_blacklists_count=0
+                    let local labl_blacklists_count=0
                 fi
 
                 if [[ ${Blacklists_Files[@]} ]]; then
-                    printf "[+]\n"
-                    printf "[+] Blacklists ($ip_family)\n"
-                    printf "[+]\n\n"
+                    echo "[+]"
+                    echo "[+] Blacklists ($ip_family)"
+                    echo "[+]"
+                    echo
                     local blacklists_file
                     for blacklists_file in ${Blacklists_Files[@]}; do
                         let blacklists_file_count=0
-                        printf "$blacklists_file\n\n"
+                        echo "$blacklists_file"
+                        echo
                         Status_Flag=1
                         if [ "$ip_family" == "inet6" ]; then
                             local blacklist_inet
-                            for blacklist_inet in $(printf "%s\n" $(lablLoad $blacklists_file lablStatus) | egrep -e '^s*((([0-9A-Fa-f]{1,4}:){7}([0-9A-Fa-f]{1,4}|:))|(([0-9A-Fa-f]{1,4}:){6}(:[0-9A-Fa-f]{1,4}|((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3})|:))|(([0-9A-Fa-f]{1,4}:){5}(((:[0-9A-Fa-f]{1,4}){1,2})|:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3})|:))|(([0-9A-Fa-f]{1,4}:){4}(((:[0-9A-Fa-f]{1,4}){1,3})|((:[0-9A-Fa-f]{1,4})?:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){3}(((:[0-9A-Fa-f]{1,4}){1,4})|((:[0-9A-Fa-f]{1,4}){0,2}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){2}(((:[0-9A-Fa-f]{1,4}){1,5})|((:[0-9A-Fa-f]{1,4}){0,3}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){1}(((:[0-9A-Fa-f]{1,4}){1,6})|((:[0-9A-Fa-f]{1,4}){0,4}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(:(((:[0-9A-Fa-f]{1,4}){1,7})|((:[0-9A-Fa-f]{1,4}){0,5}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:)))(%.+)?s*'); do
-                                printf "$blacklist_inet\n"
+                            for blacklist_inet in $(printf "%s\n" $(lablLoad $blacklists_file) | egrep -e '^s*((([0-9A-Fa-f]{1,4}:){7}([0-9A-Fa-f]{1,4}|:))|(([0-9A-Fa-f]{1,4}:){6}(:[0-9A-Fa-f]{1,4}|((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3})|:))|(([0-9A-Fa-f]{1,4}:){5}(((:[0-9A-Fa-f]{1,4}){1,2})|:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3})|:))|(([0-9A-Fa-f]{1,4}:){4}(((:[0-9A-Fa-f]{1,4}){1,3})|((:[0-9A-Fa-f]{1,4})?:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){3}(((:[0-9A-Fa-f]{1,4}){1,4})|((:[0-9A-Fa-f]{1,4}){0,2}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){2}(((:[0-9A-Fa-f]{1,4}){1,5})|((:[0-9A-Fa-f]{1,4}){0,3}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){1}(((:[0-9A-Fa-f]{1,4}){1,6})|((:[0-9A-Fa-f]{1,4}){0,4}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(:(((:[0-9A-Fa-f]{1,4}){1,7})|((:[0-9A-Fa-f]{1,4}){0,5}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:)))(%.+)?s*'); do
+                                echo $blacklist_inet
                                 let blacklists_file_count=$blacklists_file_count+1
                                 if [ $labl_blacklists_count -eq 1 ]; then
                                     let labl_blacklist_count=$labl_blacklist_count+1
                                 fi
                             done
-                            unset -v blacklist_inet
+                            unset blacklist_inet
                         else
                             local blacklist_inet
-                            for blacklist_inet in $(printf "%s\n" $(lablLoad $blacklists_file lablStatus) | egrep -e '^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])'); do
-                                printf "$blacklist_inet\n"
+                            for blacklist_inet in $(printf "%s\n" $(lablLoad $blacklists_file) | egrep -e '^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])'); do
+                                echo $blacklist_inet
                                 let blacklists_file_count=$blacklists_file_count+1
                                 if [ $labl_blacklists_count -eq 1 ]; then
                                     let labl_blacklist_count=$labl_blacklist_count+1
                                 fi
                             done
-                            unset -v blacklist_inet
+                            unset blacklist_inet
                         fi
                         if [ $blacklists_file_count -eq 0 ]; then
-                            printf "!! empty $ip_family blacklist !!\n"
+                            echo "!! empty $ip_family blacklist !!"
                         fi
                         Status_Flag=0
-                        printf "\n"
+                        echo
                     done
-                    unset -v blacklists_file
-                    printf "\n"
+                    unset blacklists_file
+                    echo
                 fi
 
                 if [ "${ip_family}" == "inet" ]; then
@@ -1529,51 +1679,53 @@ function lablStatus() {
                 # whitelist status
                 #
 
-                local -i labl_whitelist_count=$(ipset save ${Ipset_Name}_${ip_family} | grep ^add | grep nomatch$ | wc -l)
+                let local labl_whitelist_count=$(ipset save ${Ipset_Name}_${ip_family} | grep ^add | grep nomatch$ | wc -l)
                 if [ $labl_whitelist_count -eq 0 ]; then
-                    local -i labl_whitelists_count=1
+                    let local labl_whitelists_count=1
                 else
-                    local -i labl_whitelists_count=0
+                    let local labl_whitelists_count=0
                 fi
 
                 if [[ ${Whitelists_Files[@]} ]]; then
-                    printf "[+]\n"
-                    printf "[+] Whitelists ($ip_family)\n"
-                    printf "[+]\n\n"
+                    echo "[+]"
+                    echo "[+] Whitelists ($ip_family)"
+                    echo "[+]"
+                    echo
                     local whitelists_file
                     for whitelists_file in ${Whitelists_Files[@]}; do
                         let whitelists_file_count=0
-                        printf "$whitelists_file\n\n"
+                        echo "$whitelists_file"
+                        echo
                         Status_Flag=1
                         if [ "$ip_family" == "inet6" ]; then
                             local whitelist_inet
-                            for whitelist_inet in $(printf "%s\n" $(lablLoad $whitelists_file lablStatus) | egrep -e '^s*((([0-9A-Fa-f]{1,4}:){7}([0-9A-Fa-f]{1,4}|:))|(([0-9A-Fa-f]{1,4}:){6}(:[0-9A-Fa-f]{1,4}|((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3})|:))|(([0-9A-Fa-f]{1,4}:){5}(((:[0-9A-Fa-f]{1,4}){1,2})|:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3})|:))|(([0-9A-Fa-f]{1,4}:){4}(((:[0-9A-Fa-f]{1,4}){1,3})|((:[0-9A-Fa-f]{1,4})?:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){3}(((:[0-9A-Fa-f]{1,4}){1,4})|((:[0-9A-Fa-f]{1,4}){0,2}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){2}(((:[0-9A-Fa-f]{1,4}){1,5})|((:[0-9A-Fa-f]{1,4}){0,3}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){1}(((:[0-9A-Fa-f]{1,4}){1,6})|((:[0-9A-Fa-f]{1,4}){0,4}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(:(((:[0-9A-Fa-f]{1,4}){1,7})|((:[0-9A-Fa-f]{1,4}){0,5}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:)))(%.+)?s*'); do
-                                printf "$whitelist_inet\n"
+                            for whitelist_inet in $(printf "%s\n" $(lablLoad $whitelists_file) | egrep -e '^s*((([0-9A-Fa-f]{1,4}:){7}([0-9A-Fa-f]{1,4}|:))|(([0-9A-Fa-f]{1,4}:){6}(:[0-9A-Fa-f]{1,4}|((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3})|:))|(([0-9A-Fa-f]{1,4}:){5}(((:[0-9A-Fa-f]{1,4}){1,2})|:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3})|:))|(([0-9A-Fa-f]{1,4}:){4}(((:[0-9A-Fa-f]{1,4}){1,3})|((:[0-9A-Fa-f]{1,4})?:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){3}(((:[0-9A-Fa-f]{1,4}){1,4})|((:[0-9A-Fa-f]{1,4}){0,2}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){2}(((:[0-9A-Fa-f]{1,4}){1,5})|((:[0-9A-Fa-f]{1,4}){0,3}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){1}(((:[0-9A-Fa-f]{1,4}){1,6})|((:[0-9A-Fa-f]{1,4}){0,4}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(:(((:[0-9A-Fa-f]{1,4}){1,7})|((:[0-9A-Fa-f]{1,4}){0,5}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:)))(%.+)?s*'); do
+                                echo $whitelist_inet
                                 let whitelists_file_count=$whitelists_file_count+1
                                 if [ $labl_whitelists_count -eq 1 ]; then
                                     let labl_whitelist_count=$labl_whitelist_count+1
                                 fi
                             done
-                            unset -v whitelist_inet
+                            unset whitelist_inet
                         else
                             local whitelist_inet
-                            for whitelist_inet in $(printf "%s\n" $(lablLoad $whitelists_file lablStatus) | egrep -e '^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])'); do
-                                printf "$whitelist_inet\n"
+                            for whitelist_inet in $(printf "%s\n" $(lablLoad $whitelists_file) | egrep -e '^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])'); do
+                                echo $whitelist_inet
                                 let whitelists_file_count=$whitelists_file_count+1
                                 if [ $labl_whitelists_count -eq 1 ]; then
                                     let labl_whitelist_count=$labl_whitelist_count+1
                                 fi
                             done
-                            unset -v whitelist_inet
+                            unset whitelist_inet
                         fi
                         if [ $whitelists_file_count -eq 0 ]; then
-                            printf "!! empty $ip_family whitelist !!\n"
+                            echo "!! empty $ip_family whitelist !!"
                         fi
                         Status_Flag=0
-                        printf "\n"
+                        echo
                     done
-                    unset -v whitelists_file
-                    printf "\n"
+                    unset whitelists_file
+                    echo
                 fi
 
                 if [ "${ip_family}" == "inet" ]; then
@@ -1588,106 +1740,96 @@ function lablStatus() {
 
                 # ip_family summary
 
-                printf "[+]\n"
-                printf "[+] Summary ($ip_family)\n"
-                printf "[+]\n\n"
-                printf "$labl_blacklist_count blacklisted & $labl_whitelist_count whitelisted ${ip_family} addresses and/or ranges\n"
+                echo "[+]"
+                echo "[+] Summary ($ip_family)"
+                echo "[+]"
+                echo
+                echo "$labl_blacklist_count blacklisted & $labl_whitelist_count whitelisted ${ip_family} addresses and/or ranges"
+                echo
             fi
-            printf "\n"
+            echo
         fi
 
         if [ $labl_running -eq 0 ]; then
-            printf -- "----------------------------------------------------------------\n\n"
+            echo "----------------------------------------------------------------"
+            echo
         fi
     done
-    unset -v ip_family
+    unset ip_family
 
-    if [ $labl_running -eq 0 ]; then
-        if [ $labl_inet_count -eq 0 ] && [ $labl_inet6_count -eq 0 ]; then
-            printf "labl is running, nothing is being blacklisteded or whitelisted\n\n"
-        else
-            if [ $IP6_Enabled -eq 0 ]; then
-                printf "$labl_inet6_blacklist_count blacklisted and $labl_inet6_whitelist_count whitelisted v6 IP addresses\n"
-            fi
-            if [ $IP4_Enabled -eq 0 ]; then
-                printf "$labl_inet_blacklist_count blacklisted and $labl_inet_whitelist_count whitelisted v4 IP addresses\n"
-            fi
-            printf "\nlabl is running"
-            if [ $IP4_Enabled -eq 0 ] || [ $IP6_Enabled -eq 0 ]; then
-                printf ", "
-
-                if [ $IP4_Enabled -eq 0 ]; then
-                    printf "$labl_inet_count v4"
-                fi
-
-                if [ $IP4_Enabled -eq 0 ] && [ $IP6_Enabled -eq 0 ]; then
-                    printf " and "
-                fi
-
-                if [ $IP6_Enabled -eq 0 ]; then
-                    printf "$labl_inet6_count v6"
-                fi
-
-                printf " addresses loaded\n"
+    if [ $Iptables_Flag -ne 0 ]; then
+        if [ $labl_running -eq 0 ]; then
+            if [ $labl_inet_count -eq 0 ] && [ $labl_inet6_count -eq 0 ]; then
+                echo "labl is running"
+                echo
             else
-                printf "\n"
-            fi
+                echo "$labl_inet6_blacklist_count blacklisted and $labl_inet6_whitelist_count whitelisted v6 IP addresses"
+                echo "$labl_inet_blacklist_count blacklisted and $labl_inet_whitelist_count whitelisted v4 IP addresses"
+                echo
+                echo "labl is running, $labl_inet_count v4 and $labl_inet6_count v6 addresses loaded"
+                echo
 
-            # TODO debt; this part works but needs work.
-            if [ $Permanent_Flag -eq 0 ]; then
+                # TODO debt; this part works but needs work.
+                if [ $Permanent_Flag -eq 0 ]; then
 
-                printf "[+]\n"
-                printf "[+] Permanent (check); $Blacklist_Permanent_File\n"
-                printf "[+]\n\n"
+                    echo "[+]"
+                    echo "[+] Permanent (check); $Blacklist_Permanent_File"
+                    echo "[+]"
+                    echo
 
-                if [ ! -d $(dirname "$Blacklist_Permanent_File") ]; then
-                    mkdir -p "$(dirname "$Blacklist_Permanent_File")" &> /dev/null
-                    if [ $? -ne 0 ]; then
-                        aborting "[ERROR] mkdir -p $(dirname "$Blacklist_Permanent_File") failed"
+                    if [ ! -d $(dirname "$Blacklist_Permanent_File") ]; then
+                        mkdir -p "$(dirname "$Blacklist_Permanent_File")" &> /dev/null
+                        if [ $? -ne 0 ]; then
+                            aborting "[ERROR] mkdir -p $(dirname "$Blacklist_Permanent_File") failed"
+                        fi
                     fi
-                fi
 
-                printf "\n"
+                    echo
 
-                local permanent_qualifiers=0
+                    local permanent_qualifiers=0
 
-                local ip_family
-                for ip_family in ${IP_Families[@]}; do
-                    while read blacklist_ip; do
-                        if ipv4Valid $blacklist_ip; then
-                            local blacklist_qualifier=$(echo "$blacklist_ip" | awk -F\. '{print $1"."$2"."$3}')
-                            local blacklist_qualifier_count=$(ipset save ${Ipset_Name}_${ip_family} | grep -v nomatch$ | awk '{print $NF}' | grep ^${blacklist_qualifier}\. | wc -l)
-                            if [ $blacklist_qualifier_count -gt $Blacklist_Permanent_Max ]; then
-                                if ! grep ^${blacklist_qualifier}.0/24 "$Blacklist_Permanent_File" &> /dev/null; then
-                                    _echo "# blacklisted ip = $blacklist_ip, qualifier $blacklist_qualifier currently has $blacklist_qualifier_count blacklisted which is >= $Blacklist_Permanent_Max" WARNING
-                                    echo "${blacklist_qualifier}.0/24" >> "${Blacklist_Permanent_File}"
-                                    if [ $? -eq 0 ]; then
-                                        _echo "# ${blacklist_qualifier}.0/24 added to $Blacklist_Permanent_File" NOTICE
-                                    else
-                                        _error "# ${blacklist_qualifier}.0/24 failed to add to $Blacklist_Permanent_File" ERROR
+                    local ip_family
+                    for ip_family in ${IP_Families[@]}; do
+                        while read blacklist_ip; do
+                            if ipv4Valid $blacklist_ip; then
+                                local blacklist_qualifier=$(echo "$blacklist_ip" | awk -F\. '{print $1"."$2"."$3}')
+                                local blacklist_qualifier_count=$(ipset save ${Ipset_Name}_${ip_family} | grep -v nomatch$ | awk '{print $NF}' | grep ^${blacklist_qualifier}\. | wc -l)
+                                if [ $blacklist_qualifier_count -gt $Blacklist_Permanent_Max ]; then
+                                    if ! grep ^${blacklist_qualifier}.0/24 "$Blacklist_Permanent_File" &> /dev/null; then
+                                        _echo "# blacklisted ip = $blacklist_ip, qualifier $blacklist_qualifier currently has $blacklist_qualifier_count blacklisted which is >= $Blacklist_Permanent_Max" WARNING
+                                        echo "${blacklist_qualifier}.0/24" >> "${Blacklist_Permanent_File}"
+                                        if [ $? -eq 0 ]; then
+                                            _echo "# ${blacklist_qualifier}.0/24 added to $Blacklist_Permanent_File" NOTICE
+                                        else
+                                            _error "# ${blacklist_qualifier}.0/24 failed to add to $Blacklist_Permanent_File" ERROR
+                                        fi
+                                        let permanent_qualifiers=$permanent_qualifiers+1
                                     fi
-                                    let permanent_qualifiers=$permanent_qualifiers+1
                                 fi
                             fi
-                        fi
-                    done <<<  "$(ipset save ${Ipset_Name}_${ip_family} | grep -v nomatch$ | grep ^add | awk '{print $NF}' | grep -v \/ | sort -uV)"
-                done
-                unset -v ip_family
+                        done <<<  "$(ipset save ${Ipset_Name}_${ip_family} | grep -v nomatch$ | grep ^add | awk '{print $NF}' | grep -v \/ | sort -uV)"
+                    done
+                    unset ip_family
 
-                if [ ${permanent_qualifiers} -le 0 ]; then
-                    _echo "permanent check completed; no qualifiers found" OK
-                else
-                    if [ -w "${Blacklist_Permanent_File}" ]; then
-                        sort -uV "${Blacklist_Permanent_File}" -o "${Blacklist_Permanent_File}"
+                    if [ ${permanent_qualifiers} -le 0 ]; then
+                        _echo "permanent check completed; no qualifiers found" OK
+                    else
+                        if [ -w "${Blacklist_Permanent_File}" ]; then
+                            sort -uV "${Blacklist_Permanent_File}" -o "${Blacklist_Permanent_File}"
+                        fi
                     fi
+
                 fi
 
             fi
-
+        else
+            echo
+            echo "labl is NOT running"
+            echo
         fi
-    else
-        printf "\nlabl is NOT running, nothing is being ${Ipset_Mode}ed\n"
     fi
+
+    ${table_exec} -L INPUT -n
 
     # clean up
     local ip_family
@@ -1696,13 +1838,14 @@ function lablStatus() {
             rm -f /var/tmp/${Ipset_Name}_${ip_family}.status.${Timestamp}
         fi
     done
-    unset -v ip_family
+    unset ip_family
 
     exit 0
 }
 
 # remove all ip family rules & ipsets
 function lablStop() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     local rc=0
 
@@ -1710,14 +1853,14 @@ function lablStop() {
 
     local ip_family
     for ip_family in ${IP_Families[@]}; do
-        unset -v table_exec
+        unset table_exec
 
         if [ "$ip_family" == "inet" ]; then
-            if [ "$IP4_Enabled" -eq 0 ]; then
+            if [ "$IP4" -eq 0 ]; then
                 table_exec="iptables"
             fi
         else
-            if [ "$IP6_Enabled" -eq 0 ]; then
+            if [ "$IP6" -eq 0 ]; then
                 table_exec="ip6tables"
             fi
         fi
@@ -1728,54 +1871,49 @@ function lablStop() {
 
         debug "$FUNCNAME check $table_exec $ip_family rule" 10
 
-        # iptables/ip6tables bug ...; sometimes they doesn't produce results on the first try ...
-        local table_count=0
+        # iptables/ip6tables bug ???; sometimes they don't produce results on the first try ... ???
 
-        local -i table_try=3
-        local -i table_try_max=10
-        while [ $table_try -gt 0 ]; do
-            if [ $table_count -eq 0 ]; then
-                local table_count=$($table_exec -n -L INPUT | grep ^DROP.*match-set.labl_${ip_family}.src | wc -l)
-            else
+        local table_count=0
+        let local table_exec_rc=0
+        let local table_stopped=0
+        let local table_try=0
+        let local table_try_max=10
+
+        for ((table_try=0; table_try<$table_try_max; table_try++)); do
+            local table_count=$($table_exec -n -L INPUT 2> /dev/null | grep ^DROP.*match-set.labl_${ip_family}.src | wc -l)
+            if [ $table_count -ne 0 ]; then
                 break
             fi
-            ((--table_try))
         done
-        debug "$FUNCNAME $table_exec $ip_family table_count = $table_count, table_try = $table_try" 10
+        debug "$FUNCNAME $table_exec $ip_family table_count = $table_count, table_try = $table_try" 3
 
         if [ $table_count -gt 0 ]; then
-            local -i table_try_max=$table_try_max+$table_count
-        else
-            local -i table_try_max=0
-        fi
+            # match-set.labl_ is loaded into iptables
 
-        let table_stopped=0
-        if [ $table_count -gt 0 ]; then
-            while [ $table_try_max -gt 0 ]; do
-                debug "$FUNCNAME $table_exec $ip_family table_count = $table_count, table_try = $table_try, table_try_max = $table_try_max" 10
-                $table_exec -D INPUT 1 -m set --match-set ${Ipset_Name}_${ip_family} src &> /dev/null
-                if [ $? -eq 0 ]; then
+            for ((table_try=0; table_try<$table_try_max; table_try++)); do
+                $table_exec -D INPUT -m set --match-set ${Ipset_Name}_${ip_family} src -j DROP &> /dev/null
+                table_exec_rc=$?
+                if [ $table_exec_rc -eq 0 ]; then
                     let table_stopped=$table_stopped+1
+                    break
                 fi
-                ((--table_try_max))
+                debug "$FUNCNAME $table_exec $ip_family table_count = $table_count, table_try = $table_try, table_exec_rc=$table_exec_rc" 4
             done
+            debug "$FUNCNAME $table_exec $ip_family table_count = $table_count, table_try = $table_try, table_try_max = $table_try_max" 4
+
         else
             debug "$FUNCNAME $table_exec --match-set ${Ipset_Name}_${ip_family} stopped" 10
         fi
 
         # second time, check to be sure it's stopped
-        local table_count=0
-
-        local -i table_try=3
-        while [ $table_try -gt 0 ]; do
-            if [ $table_count -eq 0 ]; then
-                local table_count=$($table_exec -n -L INPUT | grep ^DROP.*match-set.labl_${ip_family}.src | wc -l)
-            else
+        for ((table_try=0; table_try<$table_try_max; table_try++)); do
+            local table_count=$($table_exec -n -L INPUT 2> /dev/null | grep ^DROP.*match-set.labl_${ip_family}.src | wc -l)
+            if [ $table_count -ne 0 ]; then
                 break
             fi
-            ((--table_try))
         done
-        debug "$FUNCNAME $table_exec $ip_family table_count = $table_count, table_try = $table_try" 10
+        debug "$FUNCNAME $table_exec $ip_family table_count = $table_count, table_try = $table_try" 3
+
 
         if [ $table_count -gt 0 ]; then
             _error "FAILED to remove $table_exec --match-set ${Ipset_Name}_${ip_family}" ERROR
@@ -1784,7 +1922,7 @@ function lablStop() {
             if [ $table_stopped -gt 0 ]; then
                 _echo "$table_exec --match-set ${Ipset_Name}_${ip_family} stopped" OK
             else
-                _echo "[-] $table_exec --match-set ${Ipset_Name}_${ip_family} was NOT loaded" NOTICE
+                _echo "[-] $table_exec --match-set ${Ipset_Name}_${ip_family} NOT loaded" NOTICE
             fi
         fi
 
@@ -1799,11 +1937,11 @@ function lablStop() {
                 rc=4
             fi
         else
-            _echo "ipset ${Ipset_Name}_${ip_family} was NOT loaded" NOTICE
+            _echo "ipset ${Ipset_Name}_${ip_family} NOT loaded" NOTICE
         fi
 
     done
-    unset -v ip_family
+    unset ip_family
 
     if [ -f "${Tmp_File}" ]; then
         rm -f "${Tmp_File}" &> /dev/null
@@ -1822,8 +1960,9 @@ function lablStop() {
 
 # cli usage
 function usage() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
-    local ip_address="<ip|ip/bits>"
+    local ip_address="<ip|ip/cidr>"
 
     local usage_header="usage: $Basename_0"
     local usage_footer=" [blacklist|whitelist] # optional, blacklist is default"
@@ -1836,13 +1975,13 @@ function usage() {
             fi
             usage_message+="$Option|"
         done
-        unset -v Option
+        unset Option
         usage_message=$(printf "$usage_message" | sed -e '/|$/s///g')
         usage_message+="> $ip_address"
         if [ "$Ipset_Mode" == "" ]; then
             local usage_message+=$usage_footer
         fi
-        usage_message+="\n-or-\n$usage_header <auto|restart|start|status|stop>"
+        usage_message+="\n-or-\n$usage_header <auto|iptables|restart|start|status|stop>"
     else
         if [ "$Option" == "$Flag" ]; then
             local usage_message="$usage_header $Option $ip_address"
@@ -1863,10 +2002,11 @@ function usage() {
 
 # cli usage options that don't require any extra arguments
 function usageOptionSingle() {
+    debug "$FUNCNAME Function = $FUNCNAME" 50
 
     local option="$1"
 
-    if [ "$option" == "auto" ] || [ "$option" == "restart" ] || [ "$option" == "save" ] || [ "$option" == "start" ] || [ "$option" == "status" ] || [ "$option" == "stop" ]; then
+    if [ "$option" == "auto" ] || [ "$option" == "restart" ] || [ "$option" == "save" ] || [ "$option" == "start" ] || [ "$option" == "iptables" ] || [ "$option" == "status" ] || [ "$option" == "stop" ]; then
         return 0
     fi
 
@@ -1879,15 +2019,28 @@ lablInit $@
 
 # supported options without other arguments are restart, start, status, stop
 
+# iptables is a special option, exit
+Iptables_Flag=1 # 0=true, 1=false
+if [ "$Option" == "iptables" ]; then
+    Start_Flag=0 # 0=true, 1=false
+    Status_Flag=0 # 0=true, 1=false
+    Iptables_Flag=0 # 0=true, 1=false
+    lablStart iptables
+    lablStatus iptables
+    exit
+fi
+
 # status is a special option, exit
 Permanent_Flag=1 # 0=true, 1=false
 Status_Flag=1 # 0=true, 1=false
 if [ "$Option" == "status" ]; then
+    Status_Flag=0
     if [ "$2" == "permanent" ]; then
         Permanent_Flag=0 # 0=true, 1=false
+        lablStatus
+    else
+        lablStatus "$2"
     fi
-    Status_Flag=0
-    lablStatus
     exit
 fi
 

@@ -1,0 +1,18 @@
+#!/bin/bash
+
+Log_File=/var/log/maillog
+
+if [ -r "$Log_File" ]; then
+
+    PATH=/bin:/sbin:/usr/bin:/usr/sbin
+    (
+    egrep postfix\/ "$Log_File" 2> /dev/null \
+        | egrep -e 'User unknown' \
+        | awk '{print $10}' \
+        | awk -F\[ '{print $NF}' \
+        | awk -F\] '{print $1}' \
+        | egrep -e '^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])($|\/([0-9]|[1-2][0-9]|3[0-2])$)' \
+        | sort -uV
+
+    ) 2> /dev/null
+fi
