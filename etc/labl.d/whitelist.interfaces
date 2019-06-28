@@ -2,5 +2,4 @@
 
 # labl whitelist for local interface subnets
 
-#ip a s | grep inet | awk '{print $2}' 2> /dev/null
 ip -o a s | sed -nEe 's#^.*inet (.*)/.*#\1#p' -e 's#^.*inet6 (.*)/.*#\1#p'
