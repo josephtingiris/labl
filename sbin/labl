@@ -31,7 +31,7 @@ Options+=(start)
 Options+=(status)
 Options+=(stop)
 
-Blacklist_Permanent_File=/etc/labl.d/blacklist.permanent
+Blacklist_Permanent_File=/var/tmp/blacklist.permanent
 Blacklist_Permanent_Max=15 # how many IPs on a subnet need to be abusive to qualify for notification
 
 Ipset_Name="labl" # The ipset name(s) prefix.
@@ -667,7 +667,19 @@ function lablFindLists() {
         fi
     done
 
-    debug "$FUNCNAME found_lists = '$find_lists' = $(echo ${found_lists[@]})" 13
+    if [ "${find_lists}" == "blacklist" ]; then
+        if [ -r "${Blacklist_Permanent_File}" ]; then
+            found_lists+=(${Blacklist_Permanent_File})
+        fi
+    fi
+
+    if [ "${find_lists}" == "whitelist" ]; then
+        if [ -r "${Whitelist_Permanent_File}" ]; then
+            found_lists+=(${Whitelist_Permanent_File})
+        fi
+    fi
+
+    debug "$FUNCNAME found_lists = '$find_lists' = $(echo ${found_lists[@]})" 3
 
     if [[ "${found_lists[@]}" ]]; then
         echo "${found_lists[@]}"
