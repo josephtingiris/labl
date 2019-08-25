@@ -4,8 +4,29 @@ PATH=/usr/bin:/bin:/usr/sbin:/sbin
 
 (
 # UDP: bad checksum. To port any port, any ulen.
-/usr/bin/dmesg | sed -nEe 's#^.* UDP: bad checksum. From (.*):(.*) to(.*):(.*) ulen (.*)#\1#p'
+dmesg | sed -nEe 's#^.* UDP: bad checksum. From (.*):(.*) to(.*):(.*) ulen (.*)#\1#p'
 
-# UDP: bad checksum. To port 161 ulen 46
-#/usr/bin/dmesg | sed -nEe 's#^.* UDP: bad checksum. From (.*):(.*) to(.*):161 ulen 46#\1#p'
+# Destination Port 23 (telnet) Scans
+dmesg | sed -nEe 's#^.* SRC=(.*)DST=(.*)DPT=23 (.*)#\1#p'
+
+# Destination Port 67 (finger) Scans
+dmesg | sed -nEe 's#^.* SRC=(.*)DST=(.*)DPT=67 (.*)#\1#p'
+
+# Destination Port 445 (microsoft-ds) Scans
+# Destination Port 79 (finger) Scans
+dmesg | sed -nEe 's#^.* SRC=(.*)DST=(.*)DPT=79 (.*)#\1#p'
+
+# Destination Port 445 (microsoft-ds) Scans
+dmesg | sed -nEe 's#^.* SRC=(.*)DST=(.*)DPT=445 (.*)#\1#p'
+
+# Source port 57520 Scans
+dmesg | sed -nEe 's#^.* SRC=(.*)DST=(.*)SPT=57520 (.*)#\1#p' | sort -u
 ) | sort -uV
+
+declare -i Hour=$(date +%-H)
+declare -i Minute=$(date +%-M)
+
+if [ ${Hour} -eq 0 ] && [ ${Minute} -lt 10 ]; then
+    # clear the ring buffer
+    dmesg -C &> /dev/null
+fi
