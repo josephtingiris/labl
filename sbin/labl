@@ -175,7 +175,7 @@ function ipv6Valid() {
 
     local inet6=${1}
 
-    if ipcalc -4 -cs "${inet6}" &> /dev/null; then
+    if ipcalc -6 -cs "${inet6}" &> /dev/null; then
         return 0
     else
         return 1

@@ -1,0 +1,11 @@
+#!/bin/bash
+
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+
+if [ -r /var/log/maillog ]; then
+    (
+    # Relay access denied
+    sed -nEe 's#.*reject: .*\[(.*)\].*Relay access denied.*#\1#p' /var/log/maillog
+
+    ) | sort -uV
+fi
