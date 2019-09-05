@@ -339,16 +339,17 @@ function lablAdd() {
                     local whitelisted=0
                 fi
             fi
-        fi
 
-        # add it to blacklist
-        if lablCheck "$ip" blacklist quiet; then
-            _echo "$ip already blacklisted" OK
-        else
-            ipset -exist add ${Ipset_Name}_${ip_family} $ip &> /dev/null
+            # add it to blacklist
             if lablCheck "$ip" blacklist quiet; then
-                _echo "[+++] $ip added to ${Ipset_Name}_${ip_family} blacklist" OK
+                _echo "$ip already blacklisted" OK
+            else
+                ipset -exist add ${Ipset_Name}_${ip_family} $ip &> /dev/null
+                if lablCheck "$ip" blacklist quiet; then
+                    _echo "[+++] $ip added to ${Ipset_Name}_${ip_family} blacklist" OK
+                fi
             fi
+
         fi
 
     fi
@@ -1897,6 +1898,8 @@ function usageOptionSingle() {
 
 # Main
 
+Auto_Flag=1 # 0=true, 1=false
+
 lablInit $@
 
 # supported options without other arguments are restart, start, status, stop
@@ -1964,7 +1967,6 @@ if [ "$Option" == "save" ]; then
 fi
 
 # auto is super special, it requires lablStart but no IP validation
-Auto_Flag=1 # 0=true, 1=false
 if [ "$Option" == "auto" ]; then
     Auto_Flag=0 # 0=true, 1=false
     lablAuto
