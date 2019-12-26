@@ -1,0 +1,116 @@
+#!/bin/bash
+
+# This is a setup script for labl.
+
+# Copyright (C) 2015-2020 Joseph Tingiris (joseph.tingiris@gmail.com)
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <http://www.gnu.org/licenses/>.
+
+# Globals
+
+PATH=/sbin:/usr/sbin:/bin:/usr/bin
+
+# Functions
+
+function aborting() {
+    printf "\naborting ... $@\n\n"
+    exit 1
+}
+
+function usage() {
+    printf "\nusage: $0 [check|install]\n\n"
+    exit 2
+}
+
+# Main
+
+if [ "${USER}" != "root" ]; then
+    aborting "only root can execute this script"
+fi
+
+if [ "${1}" == "" ]; then
+    usage
+fi
+
+if [ "${1,,}" == "install" ]; then
+    Install=0
+else
+    Install=1
+    Printf_Prefix="NOT "
+fi
+
+LABL_Dir="/opt/labl"
+
+if [ ! -x "${LABL_Dir}/sbin/labl" ]; then
+    aborting "${LABL_Dir}/sbin/labl file not found executable"
+fi
+
+if [ ! -r "${LABL_Dir}/etc/cron.d/labl" ]; then
+    aborting "${LABL_Dir}/etc/cron.d/labl file not found readable"
+fi
+
+if [ ! -r "${LABL_Dir}/etc/profile.d/labl.sh" ]; then
+    aborting "${LABL_Dir}/etc/profile.d/labl.sh file not found readable"
+fi
+
+if [ ! -d /etc/labl.d ]; then
+    printf -- "+ ${Printf_Prefix}creating /etc/labl.d\n"
+    if [ ${Install} -eq 0 ]; then
+        mkdir -p /etc/labl.d
+    fi
+fi
+
+if [ -d /etc/cron.d ]; then
+    if grep -q labl /etc/crontab &> /dev/null; then
+        printf -- "- ${Printf_Prefix}removing labl from /etc/crontab\n"
+        if [ ${Install} -eq 0 ]; then
+            sed -ie '/labl/d' /etc/crontab
+            sed -i '/^$/N;/^\n$/D' /etc/crontab
+        fi
+    fi
+
+    if [ -e /etc/cron.d/labl ]; then
+        printf -- "+ ${Printf_Prefix}re-installing /etc/cron.d/labl\n"
+    else
+        printf -- "+ ${Printf_Prefix}installing /etc/cron.d/labl\n"
+    fi
+
+    if [ ${Install} -eq 0 ]; then
+        cp -f "${LABL_Dir}/etc/cron.d/labl" /etc/cron.d
+    fi
+fi
+
+if [ -d /etc/profile.d ]; then
+    if [ -e /etc/profile.d/labl.sh ]; then
+        printf -- "+ ${Printf_Prefix}re-installing /etc/profile.d/labl.sh\n"
+    else
+        printf -- "+ ${Printf_Prefix}installing /etc/profile.d/labl.sh\n"
+    fi
+
+    if [ ${Install} -eq 0 ]; then
+        cp -f "${LABL_Dir}/etc/profile.d/labl.sh" /etc/profile.d
+    fi
+fi
+
+for Remove_File in labl blacklist whitelist; do
+    for Remove_Dir in /bin /sbin /usr/bin /usr/sbin /usr/local/bin /usr/local/sbin; do
+        if [ -e ${Remove_Dir}/${Remove_File} ]; then
+            printf -- "- ${Printf_Prefix}removing ${Remove_File} from ${Remove_Dir}\n"
+
+            if [ ${Install} -eq 0 ]; then
+                rm -f "${Remove_Dir}/${Remove_File}"
+            fi
+        fi
+    done
+done
