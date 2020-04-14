@@ -79,7 +79,7 @@ function _echo() {
     local -i pad_right=(${pad}-${#echo_status})-${pad_left}
     if [ ${pad_right} -lt 0 ]; then pad_right=1; fi
 
-    (>&2 printf "%(%Y-%m-%d %H:%M:%S %Z)T : [%${pad_left}.s%s%${pad_right}.s] : %s\n" "-1" ${pad_left} "${echo_status}" ${pad_right} "$1")
+    (>&2 printf "$(date +%Y-%m-%d\ %H:%M:%S\ %Z) : [%${pad_left}.s%s%${pad_right}.s] : %s\n" "-1" "${echo_status}" ${pad_right} "$1")
 }
 
 # print formatted output to stderr
