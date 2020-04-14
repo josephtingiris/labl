@@ -1789,7 +1789,7 @@ function lablStatus() {
                     while read blacklist_ip; do
                         if ipv4Valid ${blacklist_ip}; then
                             local blacklist_qualifier=$(echo "${blacklist_ip}" | awk -F\. '{print $1"."$2"."$3}')
-                            local blacklist_qualifier_count=$(ipset save ${Ipset_Name}_${ip_family} | grep -v nomatch$ | awk '{print $NF' | grep ^${blacklist_qualifier}\. | wc -l)
+                            local blacklist_qualifier_count=$(ipset save ${Ipset_Name}_${ip_family} | grep -v nomatch$ | awk '{print $NF}' | grep ^${blacklist_qualifier}\. | wc -l)
                             if [ ${blacklist_qualifier_count} -gt ${Blacklist_Permanent_Max} ]; then
                                 if ! grep ^${blacklist_qualifier}.0/24 "${Blacklist_Permanent_File}" &> /dev/null; then
                                     _echo "# blacklisted ip = ${blacklist_ip}, qualifier ${blacklist_qualifier} currently has ${blacklist_qualifier_count} blacklisted which is >= ${Blacklist_Permanent_Max}" WARNING
@@ -1801,9 +1801,14 @@ function lablStatus() {
                                     fi
                                     let permanent_qualifiers=${permanent_qualifiers}+1
                                 fi
+                            else
+                                if [[ "${blacklist_ip}" == *"/"* ]]; then
+                                    echo "${blacklist_ip}" >> "${Blacklist_Permanent_File}"
+                                    let permanent_qualifiers=${permanent_qualifiers}+1
+                                fi
                             fi
                         fi
-                    done <<<  "$(ipset save ${Ipset_Name}_${ip_family} | grep -v nomatch$ | grep ^add | awk '{print $NF}' | grep -v \/ | sort -uV)"
+                    done <<<  "$(ipset save ${Ipset_Name}_${ip_family} | grep -v nomatch$ | grep ^add | awk '{print $NF}' | sort -uV)"
                 done
                 unset -v ip_family
 
