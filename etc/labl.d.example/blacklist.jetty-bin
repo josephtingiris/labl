@@ -1,0 +1,38 @@
+#!/bin/bash
+
+# block openvas scanners
+
+# 20190501, jtingiris
+
+PATH=/bin:/sbin:/usr/bin:/usr/sbin
+
+Access_Logs=(/opt/zimbra/log/access_log.$(date +%Y-%m-%d))
+
+(
+
+if [ -d /opt/zimbra/jetty ]; then
+    Jetty_Bins=($(grep -l \/bin\/ $(find /opt/zimbra/jetty/ -type f -name "*jsp")))
+    for Jetty_Bin in ${Jetty_Bins[@]}; do
+        Jetty_POST="POST $(echo $Jetty_Bin | awk -F/ '{print "/"$(NF-1)"/"$NF}')"
+        #echo $Jetty_POST
+
+        for Access_Log in ${Access_Logs[@]}; do
+            Log_File=${Access_Log}
+            if [ ! -r "$Log_File" ]; then
+                continue
+            fi
+
+            echo $Log_File
+
+            egrep -e "${Jetty_POST}" "$Log_File" 2> /dev/null | awk '{print $1}'
+
+        done
+
+    done
+else
+    false
+fi
+
+) | egrep -e'^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$' | sort -uV
+
+exit $?

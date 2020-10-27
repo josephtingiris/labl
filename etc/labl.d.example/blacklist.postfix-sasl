@@ -1,0 +1,18 @@
+#!/bin/bash
+
+Log_File=/var/log/maillog
+
+if [ -r "$Log_File" ]; then
+
+    PATH=/bin:/sbin:/usr/bin:/usr/sbin
+    (
+
+    # more than 100 SASL LOGIN authentication failed
+    egrep postfix\/ "$Log_File" 2> /dev/null \
+        | egrep -e 'SASL.LOGIN|PLAIN.authentication.failed' \
+        | awk '{print $7}' | sort | uniq -c | awk '{print $1" "$2}' | grep ^[1-9][0-9][0-9] \
+        | awk -F\[ '{print $2}' | awk -F \] '{print $1}' \
+        | sort -uV
+
+    ) 2> /dev/null
+fi

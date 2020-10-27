@@ -1,0 +1,25 @@
+#!/bin/bash
+
+# block auth failures to zimbra smtps (mta)
+
+# 20181008, jtingiris
+
+PATH=/bin:/sbin:/usr/bin:/usr/sbin
+
+Log_File=/var/log/zimbra.log
+if [ ! -r "$Log_File" ]; then
+    exit
+fi
+
+(
+
+egrep -e 'SASL PLAIN authentication failed' "$Log_File" 2> /dev/null \
+    | sed -nEe "s#.*\[(.*)\].*#\1#p"
+
+egrep -e '503 5.5.1 Error: authentication not enabled' "$Log_File" 2> /dev/null \
+    | sed -nEe "s#.*\[(.*)\].*#\1#p"
+
+) | sort -uV 2> /dev/null
+
+
+exit $?

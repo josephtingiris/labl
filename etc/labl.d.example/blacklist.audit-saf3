@@ -1,0 +1,26 @@
+#!/bin/bash
+
+# block misc (zimbra) audit abuse
+
+# 20190502, jtingiris
+
+PATH=/bin:/sbin:/usr/bin:/usr/sbin
+
+Log_File=/opt/zimbra/log/audit.log
+if [ ! -r "$Log_File" ]; then
+    exit
+fi
+
+(# output a unqiue list of IP addresses matching the following signature
+
+cat "$Log_File" 2> /dev/null \
+    | egrep -e "SAF3" \
+    | egrep -e "AdminAuth" \
+    | awk -Foip= '{print $2}' \
+    | awk -F\; '{print $1}'
+
+) 2> /dev/null \
+    | egrep -e'^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$' \
+    | sort -uV
+
+exit $?

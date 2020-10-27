@@ -1,0 +1,26 @@
+#!/bin/bash
+
+# block openvas scanners
+
+# 20190501, jtingiris
+
+PATH=/bin:/sbin:/usr/bin:/usr/sbin
+
+Access_Logs=(/opt/zimbra/log/access_log.$(date +%Y-%m-%d))
+(
+
+for Access_Log in ${Access_Logs[@]}; do
+    Log_File=${Access_Log}
+    if [ ! -r "$Log_File" ]; then
+        continue
+    fi
+
+    echo $Log_File
+
+    egrep -e 'OpenVas' "$Log_File" 2> /dev/null \
+        | awk '{print $1}'
+done
+
+) | egrep -e'^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$' | sort -uV
+
+exit $?

@@ -2,15 +2,8 @@
 
 # blacklist firehol spamhaus lists once per day
 
-TMP_FILE=/var/tmp/blacklist.firehol.tmp
-
-if [ ! -f "${TMP_FILE}" ] || [ "$(date +%Y%m%d -r "${TMP_FILE}")" != "$(date +%Y%m%d)" ]; then
-    (
+if [[ $((10#$(date +%H))) -eq 23 ]] && [[ $((10#$(date +%M))) -gt 50 ]]; then
     curl https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/spamhaus_drop.netset 2> /dev/null
     curl https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/spamhaus_edrop.netset 2> /dev/null
     curl https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/dshield_7d.netset 2> /dev/null
-    if [ $? -eq 0 ]; then
-        touch "${TMP_FILE}"
-    fi
-    ) | sort -uV
 fi
